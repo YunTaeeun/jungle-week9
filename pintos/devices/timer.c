@@ -1,12 +1,97 @@
 #include "devices/timer.h"
 #include <debug.h>
-#include <inttypes.h>
+#include <inttypes.h>  /* int64_t, int32_t 등의 표준 정수 타입 정의 (C99 표준)
+                          - int64_t: 64비트 부호 있는 정수형, 플랫폼 독립적으로 정확히 64비트 보장
+                          - 범위: -9,223,372,036,854,775,808 ~ 9,223,372,036,854,775,807
+                          - 직접 정의한 타입이 아니라 표준 C 라이브러리에서 제공 */
 #include <round.h>
 #include <stdio.h>
 #include "threads/interrupt.h"
 #include "threads/io.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
+
+/* ====================================================================
+   이 파일에서 사용되는 기본 함수/매크로 설명
+   ====================================================================
+   
+   [최적화 배리어]
+   barrier()
+   - 정의: #define barrier() asm volatile ("" : : : "memory") (synch.h)
+   - 기능: 컴파일러 최적화를 방지하는 배리어
+   - 매개변수: 없음
+   - 반환값: 없음
+   - 사용 이유: 메모리 접근 순서를 보장하기 위해 사용
+              컴파일러가 barrier() 앞뒤의 메모리 접근을 재정렬하지 않도록 함
+   - 예시: ticks 변수를 읽은 후 barrier()를 호출하면, 
+           그 이후의 코드가 ticks 값을 사용하기 전에 최신 값임을 보장
+   
+   [디버그 어설션]
+   ASSERT(CONDITION)
+   - 정의: #define ASSERT(CONDITION) ... (debug.h)
+   - 기능: 조건이 거짓이면 시스템을 중단하고 오류 메시지 출력
+   - 매개변수: CONDITION - 검사할 조건식 (예: intr_get_level() == INTR_ON)
+   - 반환값: 없음 (조건이 참이면 아무것도 하지 않음, 거짓이면 PANIC 호출)
+   - 사용 이유: 프로그래밍 오류를 조기에 발견하기 위해 사용
+              디버그 모드(NDEBUG가 정의되지 않음)에서만 동작
+              릴리스 모드에서는 ((void) 0)으로 치환되어 제거됨
+   - 예시: ASSERT(intr_get_level() == INTR_ON) 
+           → 인터럽트가 켜져 있어야 하는데 꺼져 있으면 오류
+   
+   [인터럽트 제어 함수들]
+   enum intr_level intr_get_level(void)
+   - 기능: 현재 인터럽트 상태를 반환
+   - 매개변수: 없음
+   - 반환값: enum intr_level (INTR_ON 또는 INTR_OFF)
+   - 구현: CPU의 flags 레지스터에서 인터럽트 플래그(IF)를 읽어서 확인
+   - 사용 이유: 현재 인터럽트가 활성화되어 있는지 확인할 때 사용
+   
+   enum intr_level intr_disable(void)
+   - 기능: 인터럽트를 비활성화하고 이전 상태를 반환
+   - 매개변수: 없음
+   - 반환값: enum intr_level (비활성화하기 전의 상태)
+   - 구현: CPU의 CLI 명령어를 실행하여 인터럽트 플래그를 클리어
+   - 사용 이유: 원자적 연산을 보장하기 위해 인터럽트를 일시적으로 비활성화
+              반환값을 저장해두었다가 나중에 intr_set_level()로 복원
+   
+   enum intr_level intr_set_level(enum intr_level level)
+   - 기능: 인터럽트 상태를 설정하고 이전 상태를 반환
+   - 매개변수: level - 설정할 인터럽트 상태 (INTR_ON 또는 INTR_OFF)
+   - 반환값: enum intr_level (설정하기 전의 상태)
+   - 구현: level에 따라 intr_enable() 또는 intr_disable() 호출
+   - 사용 이유: 인터럽트 상태를 복원할 때 사용
+              intr_disable()로 저장한 이전 상태를 복원하는 데 유용
+   
+   enum intr_level intr_enable(void)
+   - 기능: 인터럽트를 활성화하고 이전 상태를 반환
+   - 매개변수: 없음
+   - 반환값: enum intr_level (활성화하기 전의 상태)
+   - 구현: CPU의 STI 명령어를 실행하여 인터럽트 플래그를 설정
+   - 사용 이유: 인터럽트를 다시 활성화할 때 사용
+   
+   [스레드 관련 함수들]
+   void thread_yield(void)
+   - 기능: 현재 실행 중인 스레드가 CPU를 양보하고 ready queue에 추가
+   - 매개변수: 없음
+   - 반환값: 없음
+   - 사용 이유: 스레드가 다른 스레드에게 CPU를 양보하고 싶을 때 사용
+              timer_sleep()에서 busy-wait 루프 중에 CPU를 양보하여
+              다른 스레드가 실행될 수 있도록 함
+   
+   void thread_tick(void)
+   - 기능: 타이머 틱마다 호출되어 스레드 스케줄링 관련 작업 수행
+   - 매개변수: 없음
+   - 반환값: 없음
+   - 사용 이유: 시간 할당량(TIME_SLICE)을 확인하고, 
+              시간이 지나면 스레드 전환을 요청
+              timer_interrupt()에서 호출됨
+   
+   struct thread *thread_current(void)
+   - 기능: 현재 실행 중인 스레드의 구조체 포인터를 반환
+   - 매개변수: 없음
+   - 반환값: struct thread * (현재 스레드의 포인터)
+   - 사용 이유: 현재 스레드의 정보에 접근하거나 상태를 변경할 때 사용
+   ==================================================================== */
 
 /* 8254 타이머 칩의 하드웨어 상세 정보는 [8254]를 참조하세요. */
 
@@ -21,10 +106,12 @@
 #endif
 
 /* OS 부팅 이후의 타이머 틱 수. */
+/* int64_t 사용 이유: 타이머 틱은 계속 증가하므로 오버플로우를 방지하기 위해 큰 타입 필요 */
 static int64_t ticks;
 
 /* 타이머 틱당 루프 수.
-   timer_calibrate()에 의해 초기화됩니다. */
+   timer_calibrate()에 의해 초기화됩니다.
+   사용 이유: 짧은 시간 대기(busy_wait)를 구현하기 위해 CPU 속도를 측정한 값 */
 static unsigned loops_per_tick;
 
 static intr_handler_func timer_interrupt;
@@ -33,7 +120,11 @@ static void busy_wait (int64_t loops);
 static void real_time_sleep (int64_t num, int32_t denom);
 
 /* 8254 프로그래머블 간격 타이머(PIT)를 초당 PIT_FREQ번
-   인터럽트하도록 설정하고, 해당 인터럽트를 등록합니다. */
+   인터럽트하도록 설정하고, 해당 인터럽트를 등록합니다.
+   
+   사용 이유:
+   - OS가 시간을 추적하고 스케줄링을 하기 위해 하드웨어 타이머를 초기화해야 함
+   - 시스템 부팅 시 한 번만 호출되어 타이머 하드웨어를 설정 */
 void timer_init (void) {
 	/* 8254 입력 주파수를 TIMER_FREQ로 나눈 값,
 	   가장 가까운 값으로 반올림. */
@@ -46,7 +137,28 @@ void timer_init (void) {
 	intr_register_ext (0x20, timer_interrupt, "8254 Timer");
 }
 
-/* 짧은 지연을 구현하는 데 사용되는 loops_per_tick을 보정합니다. */
+/* 짧은 지연을 구현하는 데 사용되는 loops_per_tick을 보정합니다.
+   
+   사용 이유:
+   - CPU마다 속도가 다르므로, 정확한 짧은 시간 대기를 위해 CPU 속도를 측정해야 함
+   - busy_wait() 함수가 정확한 시간만큼 대기할 수 있도록 루프 횟수를 계산
+   - 시스템 부팅 시 한 번만 실행되어 CPU 속도를 측정 
+   
+	timer_init()
+	↓
+	초당 100번 인터럽트 발생하도록 하드웨어 설정
+	↓
+	매 10ms마다 timer_interrupt() 호출
+	↓
+	ticks++ (1틱 증가)
+	↓
+	timer_calibrate()
+	↓
+	한 틱(10ms) 동안 몇 번의 루프를 실행할 수 있는지 측정
+	↓
+	loops_per_tick 값 계산 (예: 14336)
+ 
+   */
 void timer_calibrate (void) {
 	unsigned high_bit, test_bit;
 
@@ -70,22 +182,46 @@ void timer_calibrate (void) {
 	printf ("%'"PRIu64" loops/s.\n", (uint64_t) loops_per_tick * TIMER_FREQ);
 }
 
-/* OS 부팅 이후의 타이머 틱 수를 반환합니다. */
+/* OS 부팅 이후의 타이머 틱 수를 반환합니다.
+   
+   사용 이유:
+   - 현재 시간을 알아야 스레드 스케줄링, 타이머 대기 등을 할 수 있음
+   - 다른 함수들이 시간을 측정하거나 비교할 때 사용
+   - 인터럽트로 인한 경쟁 조건을 방지하기 위해 인터럽트를 비활성화하고 읽음 */
 int64_t timer_ticks (void) {
-	enum intr_level old_level = intr_disable ();
-	int64_t t = ticks;
-	intr_set_level (old_level);
-	barrier ();
+	enum intr_level old_level = intr_disable (); // 인터럽트를 비활성화하고 이전 상태를 저장
+	int64_t t = ticks; // ticks 값을 가져옮
+	intr_set_level (old_level); // 인터럽트 상태를 복원
+	barrier (); // 메모리 접근 순서를 보장
+	/*
+		barrier()가 필요한 이유
+		// 컴파일러가 이렇게 최적화할 수 있음
+		int64_t timer_ticks_optimized (void) {
+		intr_disable ();
+		intr_set_level (...);  // 순서가 바뀔 수 있음!
+		int64_t t = ticks;     // 읽기 전에 복원?
+		return t;
+		}
+	*/
 	return t;
 }
 
 /* THEN 이후 경과된 타이머 틱 수를 반환합니다.
-   THEN은 timer_ticks()가 반환한 값이어야 합니다. */
+   THEN은 timer_ticks()가 반환한 값이어야 합니다.
+   
+   사용 이유:
+   - 특정 시점으로부터 얼마나 시간이 지났는지 계산할 때 편리함
+   - timer_sleep() 등에서 경과 시간을 확인하는 데 사용 */
 int64_t timer_elapsed (int64_t then) {
 	return timer_ticks () - then;
 }
 
-/* 약 TICKS개의 타이머 틱 동안 실행을 일시 중단합니다. */
+/* 약 TICKS개의 타이머 틱 동안 실행을 일시 중단합니다.
+   
+   사용 이유:
+   - 스레드가 특정 시간 동안 대기해야 할 때 사용
+   - 현재는 busy-wait 방식으로 구현되어 있으나, 나중에 block 방식으로 개선 예정
+   - 틱 단위는 OS 내부 시간 단위 (예: TIMER_FREQ=100이면 1틱 = 10ms) */
 void timer_sleep (int64_t ticks) {
 	/* 현재 타이머 틱 수를 저장 */
 	int64_t start = timer_ticks ();
@@ -96,35 +232,77 @@ void timer_sleep (int64_t ticks) {
 		thread_yield ();
 }
 
-/* 약 MS 밀리초 동안 실행을 일시 중단합니다. */
+/* 약 MS 밀리초 동안 실행을 일시 중단합니다.
+   
+   사용 이유:
+   - 밀리초(1/1000초) 단위로 대기하는 것이 더 직관적이고 편리함
+   - 예: timer_msleep(100) = 100밀리초 = 0.1초 대기
+   - 내부적으로 real_time_sleep()을 호출하여 틱으로 변환
+   
+   왜 별도 함수인가?
+   - 사용자가 단위 변환을 직접 할 필요 없이 자연스럽게 밀리초 단위로 사용 가능
+   - 코드 가독성 향상: timer_msleep(100)이 timer_sleep(10)보다 의미가 명확 */
 void timer_msleep (int64_t ms) {
 	/* 약 MS 밀리초를 타이머 틱으로 변환하여 대기 */
 	real_time_sleep (ms, 1000);
 }
 
-/* 약 US 마이크로초 동안 실행을 일시 중단합니다. */
+/* 약 US 마이크로초 동안 실행을 일시 중단합니다.
+   
+   사용 이유:
+   - 마이크로초(1/1,000,000초) 단위로 매우 짧은 시간을 정밀하게 대기할 때 사용
+   - 예: timer_usleep(1000) = 1000마이크로초 = 1밀리초 대기
+   - 하드웨어 제어나 정밀한 타이밍이 필요한 경우에 사용
+   
+   왜 별도 함수인가?
+   - 밀리초보다 더 짧은 시간을 다룰 때 사용
+   - 단위가 다르므로 별도 함수로 제공하는 것이 명확함 */
 void timer_usleep (int64_t us) {
 	real_time_sleep (us, 1000 * 1000);
 }
 
-/* 약 NS 나노초 동안 실행을 일시 중단합니다. */
+/* 약 NS 나노초 동안 실행을 일시 중단합니다.
+   
+   사용 이유:
+   - 나노초(1/1,000,000,000초) 단위로 극도로 짧은 시간을 대기할 때 사용
+   - 예: timer_nsleep(1000000) = 1000000나노초 = 1밀리초 대기
+   - 실제로는 타이머 해상도(TIMER_FREQ=100이면 10ms)보다 짧으면 busy_wait 사용
+   
+   왜 별도 함수인가?
+   - 마이크로초보다도 더 짧은 시간 단위
+   - 각 시간 단위별로 함수를 제공하여 사용자가 적절한 함수를 선택할 수 있음
+   
+   참고: 실제 OS에서는 나노초 단위 정확도는 하드웨어 제약으로 달성하기 어려움 */
 void timer_nsleep (int64_t ns) {
 	real_time_sleep (ns, 1000 * 1000 * 1000);
 }
 
-/* 타이머 통계를 출력합니다. */
+/* 타이머 통계를 출력합니다.
+   
+   사용 이유:
+   - 디버깅이나 시스템 모니터링 시 현재까지 경과한 시간을 확인
+   - 테스트나 성능 분석에 유용 */
 void timer_print_stats (void) {
 	printf ("Timer: %"PRId64" ticks\n", timer_ticks ());
 }
 
-/* 타이머 인터럽트 핸들러. */
+/* 타이머 인터럽트 핸들러.
+   
+   사용 이유:
+   - 하드웨어 타이머가 주기적으로 인터럽트를 발생시킬 때마다 호출됨
+   - ticks를 증가시켜 시간을 추적하고, thread_tick()을 호출하여 스케줄링 수행
+   - 매 TIMER_FREQ번(초당 100번) 호출되어 OS의 시간 개념을 제공 */
 static void timer_interrupt (struct intr_frame *args UNUSED) {
 	ticks++;
 	thread_tick ();
 }
 
 /* LOOPS번의 반복이 하나 이상의 타이머 틱을 기다리면
-   true를 반환하고, 그렇지 않으면 false를 반환합니다. */
+   true를 반환하고, 그렇지 않으면 false를 반환합니다.
+   
+   사용 이유:
+   - timer_calibrate()에서 CPU 속도를 측정할 때 사용
+   - 특정 루프 횟수가 한 틱보다 짧은지 긴지 판단하여 loops_per_tick을 계산 */
 static bool too_many_loops (unsigned loops) {
 	/* 타이머 틱을 기다립니다. */
 	int64_t start = ticks;
@@ -166,13 +344,26 @@ static bool too_many_loops (unsigned loops) {
 	인라인화 해서 또 추가로 최적화가 가능해 지지만
 	크기가 큰 코드를 인라인화 하면 전체 크기가 증가할수 있음
 	그리고 인라인화 되버리면 디버깅이 어려워짐 
-*/
+   
+   사용 이유:
+   - 타이머 틱보다 짧은 시간(서브틱)을 정확하게 대기할 때 사용
+   - CPU를 계속 사용하는 busy-wait 방식이지만, 매우 짧은 시간이므로 허용됨
+   - real_time_sleep()에서 틱 단위로 변환할 수 없는 짧은 시간에 사용 */
 static void NO_INLINE busy_wait (int64_t loops) {
 	while (loops-- > 0)
 		barrier ();
 }
 
-/* 약 NUM/DENOM초 동안 대기합니다. */
+/* 약 NUM/DENOM초 동안 대기합니다.
+   
+   사용 이유:
+   - timer_msleep(), timer_usleep(), timer_nsleep()의 공통 구현체
+   - 분수 형태로 시간을 표현하여 다양한 단위를 하나의 함수로 처리
+   - 예: timer_msleep(100) → real_time_sleep(100, 1000) = 100/1000초 = 0.1초
+   
+   동작 방식:
+   - ticks > 0: timer_sleep() 사용 (스레드가 block되어 CPU를 양보)
+   - ticks <= 0: busy_wait() 사용 (매우 짧은 시간이므로 busy-wait가 더 정확) */
 static void real_time_sleep (int64_t num, int32_t denom) {
 	/* NUM/DENOM초를 타이머 틱으로 변환합니다. 내림 처리합니다.
 
