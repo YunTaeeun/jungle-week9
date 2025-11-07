@@ -216,20 +216,49 @@ int64_t timer_elapsed (int64_t then) {
 	return timer_ticks () - then;
 }
 
+
+
+static bool fastResstartThread(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED) {
+	struct thread *ta = list_entry(a, struct thread, elem);
+	struct thread *tb = list_entry(b, struct thread, elem);
+	return ta->resstartTick < tb->resstartTick;
+}
+
+
+
+
 /* 약 TICKS개의 타이머 틱 동안 실행을 일시 중단합니다.
    
    사용 이유:
    - 스레드가 특정 시간 동안 대기해야 할 때 사용
    - 현재는 busy-wait 방식으로 구현되어 있으나, 나중에 block 방식으로 개선 예정
-   - 틱 단위는 OS 내부 시간 단위 (예: TIMER_FREQ=100이면 1틱 = 10ms) */
-void timer_sleep (int64_t ticks) {
-	/* 현재 타이머 틱 수를 저장 */
-	int64_t start = timer_ticks ();
+   - 틱 단위는 OS 내부 시간 단위 (예: TIMER_FREQ=100이면 1틱 = 10ms) 
 
-	ASSERT (intr_get_level () == INTR_ON);
-	/* 현재 타이머 틱 수와 시작 타이머 틱 수의 차이가 TICKS보다 작을 때까지 반복 */
-	while (timer_elapsed (start) < ticks)
-		thread_yield ();
+   
+   사용 이유:
+   - 스레드가 특정 시간 동안 대기해야 할 때 사용
+   - 현재는 busy-wait 방식으로 구현되어 있으나, 나중에 block 방식으로 개선 예정
+   - 틱 단위는 OS 내부 시간 단위 (예: TIMER_FREQ=100이면 1틱 = 10ms) 
+
+   블록으로 구현
+   몇 틱 동안의 슬립 요청이 들어옮
+   현재 틱을 가져옮
+   현재 틱에 기다려야하는 틱을 더함 = resstartTick
+   기다려야하는 스레드를 멈추고
+   현재 리스트에서 제거
+   블록 리스트에 현재 스레드를 넣고 resstartTick 이되면 스레드 멈춤을 풀고
+   다시 작동중 리스트에 넣어줌
+*/
+void timer_sleep (int64_t ticks) {
+	int64_t start = timer_ticks (); // 현재 틱을 가져옮
+	ASSERT (intr_get_level () == INTR_ON); 
+	struct thread *t = thread_current (); // 현재 스레드를 가져옮
+	t->resstartTick = start + ticks; // 기다려야하는 틱을 더해서 재시작해야되는 시간을 계산
+	// 현재 스레드를 블록 리스트에 넣어줌 resstartTick 기준으로 정렬
+	enum intr_level old_level = intr_disable();
+	list_insert_ordered(&block_list, &t->elem, fastResstartThread, NULL); 
+	thread_block(); // 현재 스레드를 블록 시킴
+	intr_set_level(old_level);
 }
 
 /* 약 MS 밀리초 동안 실행을 일시 중단합니다.
@@ -295,6 +324,19 @@ void timer_print_stats (void) {
 static void timer_interrupt (struct intr_frame *args UNUSED) {
 	ticks++;
 	thread_tick ();
+
+	if (list_empty(&block_list))
+		return;
+	while (!list_empty(&block_list)) {
+		struct list_elem *e = list_front(&block_list);
+		struct thread *t = list_entry(e, struct thread, elem);
+		if (t->resstartTick <= ticks) {
+			list_pop_front(&block_list);
+			thread_unblock(t); // 해당 스레드를 블록 해제
+		} else {
+			break;
+		}
+	}
 }
 
 /* LOOPS번의 반복이 하나 이상의 타이머 틱을 기다리면
