@@ -1,0 +1,35 @@
+cd .. && make clean && make && cd build
+
+for t in alarm-{single,multiple,simultaneous,priority,zero,negative}; do make tests/threads/$t.result; done
+
+for t in priority-{change,donate-one,donate-multiple,donate-multiple2,donate-nest,donate-sema,donate-lower,fifo,preempt,sema,condvar,donate-chain}; do make tests/threads/$t.result; done
+
+
+
+
+for t in priority-{change,fifo,preempt,sema,condvar}; do make tests/threads/$t.result; done
+for t in priority-{change,fifo,preempt}; do make tests/threads/$t.result; done
+for t in priority-{sema,condvar}; do make tests/threads/$t.result; done
+
+
+
+
+
+
+priority-change, priority-preempt, priority-fifo, priority-sema, priority-condvar,
+
+
+
+
+
+
+
+방은우 뮤택스 세마포어 // 깃북 // 코드 찾기 // 과제 분석 // 로직 생각
+소영 누님 // 백트레이스 디버깅 툴 // 인터럽트 핸들러 코드 파악 // 플로우 확인 // 우선순위 생각 구현 
+
+
+
+
+
+함수명,변수명
+소문자,_

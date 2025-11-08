@@ -332,13 +332,17 @@ static void timer_interrupt (struct intr_frame *args UNUSED) {
 	while (!list_empty(&sleep_list)) {
 		struct list_elem *e = list_front(&sleep_list);
 		struct thread *t = list_entry(e, struct thread, elem);
+      struct thread *cur_thread = thread_current ();
 		if (t->wakeup_tick <= ticks) {
 			list_pop_front(&sleep_list);
 			thread_unblock(t); // 해당 스레드를 블록 해제
-		} else {
-			break;
-		}
-	}
+         if (t->priority > cur_thread->priority) {
+            thread_yield(); // 인터럽트 컨텍스트에서 스레드 양보가 필요하면 실행되도록 
+         }
+      } else {
+         break;
+      }
+   }
 }
 
 // static void timer_interrupt (struct intr_frame *args UNUSED) {
