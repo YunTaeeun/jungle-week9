@@ -53,6 +53,8 @@ $(foreach test,$(TESTS),$(eval $(test).output: TEST = $(test)))
 # Prevent an environment variable VERBOSE from surprising us.
 VERBOSE =
 
+PATH := /workspaces/jungle-week9/pintos/utils:$(PATH)
+export PATH
 TESTCMD = pintos -v -k -T $(TIMEOUT) -m $(MEMORY)
 TESTCMD += $(SIMULATOR)
 TESTCMD += $(PINTOSOPTS)

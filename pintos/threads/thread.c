@@ -28,6 +28,9 @@
    that are ready to run but not actually running. */
 static struct list ready_list;
 
+/* List of processes in THREAD_BLOCKED state, that is, processes
+   that are blocked and waiting for an event to trigger. */
+
 /* Idle thread. */
 static struct thread *idle_thread;
 
@@ -62,6 +65,7 @@ static void init_thread (struct thread *, const char *name, int priority);
 static void do_schedule(int status);
 static void schedule (void);
 static tid_t allocate_tid (void);
+static bool compare_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
 
 /* Returns true if T appears to point to a valid thread. */
 #define is_thread(t) ((t) != NULL && (t)->magic == THREAD_MAGIC)
@@ -103,7 +107,7 @@ thread_init (void) {
 		.size = sizeof (gdt) - 1,
 		.address = (uint64_t) gdt
 	};
-	lgdt (&gdt_ds);
+	lgdt (&gdt_ds);	
 
 	/* Init the globla thread context */
 	lock_init (&tid_lock);
@@ -240,8 +244,8 @@ thread_unblock (struct thread *t) {
 
 	old_level = intr_disable ();
 	ASSERT (t->status == THREAD_BLOCKED);
-	list_push_back (&ready_list, &t->elem);
 	t->status = THREAD_READY;
+	list_insert_ordered(&ready_list, &t->elem, compare_priority, NULL);
 	intr_set_level (old_level);
 }
 
@@ -303,7 +307,7 @@ thread_yield (void) {
 
 	old_level = intr_disable ();
 	if (curr != idle_thread)
-		list_push_back (&ready_list, &curr->elem);
+		list_insert_ordered(&ready_list, &curr->elem, compare_priority, NULL);
 	do_schedule (THREAD_READY);
 	intr_set_level (old_level);
 }
@@ -423,6 +427,14 @@ next_thread_to_run (void) {
 	else
 		return list_entry (list_pop_front (&ready_list), struct thread, elem);
 }
+
+static bool compare_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED) {
+	struct thread *ta = list_entry(a, struct thread, elem);
+	struct thread *tb = list_entry(b, struct thread, elem);
+	return ta->priority > tb->priority;
+}
+
+
 
 /* Use iretq to launch the thread */
 void
