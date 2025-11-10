@@ -97,7 +97,6 @@ static uint64_t gdt[3] = {0, 0x00af9a000000ffff, 0x00cf92000000ffff};
 	 finishes. */
 void thread_init(void)
 {
-	printf("🟥 thread_init() called in thread.c \n");
 	ASSERT(intr_get_level() == INTR_OFF);
 
 	/* Reload the temporal gdt for the kernel
@@ -124,7 +123,6 @@ void thread_init(void)
 	 Also creates the idle thread. */
 void thread_start(void)
 {
-	// printf("🟥 thread_start() called in thread.c \n");
 	/* Create the idle thread. */
 	struct semaphore idle_started;
 	sema_init(&idle_started, 0);
@@ -141,7 +139,6 @@ void thread_start(void)
 	 Thus, this function runs in an external interrupt context. */
 void thread_tick(void)
 {
-	// printf("🟥 thread_tick() called in thread.c \n");
 	struct thread *t = thread_current();
 
 	/* Update statistics. */
@@ -249,6 +246,7 @@ void thread_unblock(struct thread *t)
 	t->status = THREAD_READY;
 	list_insert_ordered(&ready_list, &t->elem, compare_priority, NULL);
 
+	// 추가한 부분. week08. 11.10
 	// 새로 만든 스레드가 현재 실행중인 스레드보다 우선순위가 높으면 바로 양보해야한다.
 	// 현재 실행중인 스레드보다 높은 우선순위의 스레드가 생성됐을 경우,
 	// 현재 스레드를 ready_list에 넣고, 생성된 스레드를 수행한다.
