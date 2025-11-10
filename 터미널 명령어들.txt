@@ -1,4 +1,4 @@
-cd .. && make clean && make && cd build
+cd .. && make clean && make && cd build 
 
 for t in alarm-{single,multiple,simultaneous,priority,zero,negative}; do make tests/threads/$t.result; done
 
@@ -8,10 +8,14 @@ for t in priority-{change,donate-one,donate-multiple,donate-multiple2,donate-nes
 
 
 for t in priority-{change,fifo,preempt,sema,condvar}; do make tests/threads/$t.result; done
+
+
 for t in priority-{change,fifo,preempt}; do make tests/threads/$t.result; done
 for t in priority-{sema,condvar}; do make tests/threads/$t.result; done
 
 
+
+cd .. && make clean && make && cd build && for t in priority-{change,fifo,preempt,sema,condvar}; do make tests/threads/$t.result; done
 
 
 
@@ -23,3 +27,39 @@ priority-change, priority-preempt, priority-fifo, priority-sema, priority-condva
 
 함수명,변수명
 소문자,_
+
+
+
+
+
+
+int priority;
+int original_priority;
+void donate_priority;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

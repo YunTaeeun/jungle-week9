@@ -225,8 +225,7 @@ thread_print_stats (void) {
    실제 우선순위 스케줄링은 구현되어 있지 않습니다.
    우선순위 스케줄링은 과제 1-3의 목표입니다. */
 tid_t
-thread_create (const char *name, int priority,
-		thread_func *function, void *aux) {
+thread_create (const char *name, int priority,thread_func *function, void *aux) {
 	struct thread *t;
 	tid_t tid;
 
@@ -306,6 +305,18 @@ thread_unblock (struct thread *t) {
 	t->status = THREAD_READY;
 	list_insert_ordered(&ready_list, &t->elem, compare_priority, NULL);
 	intr_set_level (old_level);
+}
+
+/* Reorders a thread in the ready list when its priority changes.
+   Must be called with interrupts disabled. */
+void
+thread_reorder_ready_list (struct thread *t) {
+	ASSERT (is_thread (t));
+	ASSERT (t->status == THREAD_READY);
+	ASSERT (intr_get_level () == INTR_OFF);
+
+	list_remove(&t->elem);
+	list_insert_ordered(&ready_list, &t->elem, compare_priority, NULL);
 }
 
 /* Returns the name of the running thread. */
@@ -388,13 +399,27 @@ thread_yield (void) {
 void
 thread_set_priority (int new_priority) {
 	struct thread *cur_thread = thread_current ();
-	if (new_priority < cur_thread->priority) {
+
+	if(cur_thread->original_priority == cur_thread->priority) {// 도네이션이 없는 상황
+		if (new_priority < cur_thread->priority) { // 낮아지면 thread_yield 실행
+			cur_thread->original_priority = new_priority;
+			cur_thread->priority = new_priority;
+			thread_yield(); // 인터럽트 컨텍스트에서 스레드 양보가 필요하면 실행되도록 
+		}
+		else {
+		cur_thread->original_priority = new_priority;
 		cur_thread->priority = new_priority;
-		thread_yield(); // 인터럽트 컨텍스트에서 스레드 양보가 필요하면 실행되도록 
-	 }	
-	 else {
-		cur_thread->priority = new_priority;
-	 }
+		}
+	}
+	else { // 도네이션이 실행된 상황
+		if(cur_thread->priority < new_priority) {// 변경 값이 도네이션 받은 값보다 큼
+			/*두 값다 새로운 값으로 변경*/
+			cur_thread->priority = new_priority;
+			cur_thread->original_priority = new_priority;
+		}
+		/*도네이션 값보다는 작으면 오리지날만 변경*/
+		else cur_thread->original_priority = new_priority;	
+	}
 }
 
 /* Returns the current thread's priority. */
@@ -499,7 +524,10 @@ init_thread (struct thread *t, const char *name, int priority) {
 	strlcpy (t->name, name, sizeof t->name);
 	t->tf.rsp = (uint64_t) t + PGSIZE - sizeof (void *);
 	t->priority = priority;
+	t->original_priority = priority;
 	t->magic = THREAD_MAGIC;
+	t->waiting_lock = NULL;
+	list_init(&t->holding_locks);
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should
