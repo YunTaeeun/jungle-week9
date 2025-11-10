@@ -97,6 +97,7 @@ static uint64_t gdt[3] = {0, 0x00af9a000000ffff, 0x00cf92000000ffff};
 	 finishes. */
 void thread_init(void)
 {
+	printf("🟥 thread_init() called in thread.c \n");
 	ASSERT(intr_get_level() == INTR_OFF);
 
 	/* Reload the temporal gdt for the kernel
@@ -123,6 +124,7 @@ void thread_init(void)
 	 Also creates the idle thread. */
 void thread_start(void)
 {
+	// printf("🟥 thread_start() called in thread.c \n");
 	/* Create the idle thread. */
 	struct semaphore idle_started;
 	sema_init(&idle_started, 0);
@@ -139,6 +141,7 @@ void thread_start(void)
 	 Thus, this function runs in an external interrupt context. */
 void thread_tick(void)
 {
+	// printf("🟥 thread_tick() called in thread.c \n");
 	struct thread *t = thread_current();
 
 	/* Update statistics. */
@@ -159,8 +162,6 @@ void thread_tick(void)
 /* Prints thread statistics. */
 void thread_print_stats(void)
 {
-	printf("Thread: %lld idle ticks, %lld kernel ticks, %lld user ticks\n",
-				 idle_ticks, kernel_ticks, user_ticks);
 }
 
 /* Creates a new kernel thread named NAME with the given initial
@@ -241,14 +242,20 @@ void thread_unblock(struct thread *t)
 
 	ASSERT(is_thread(t));
 
-	old_level = intr_disable();
+	old_level = intr_disable(); //
+
+	// thread_create호출 > 새로 만든 스레드를 READY상태로 바꾸고, ready_list에 넣는다.
 	ASSERT(t->status == THREAD_BLOCKED);
 	t->status = THREAD_READY;
 	list_insert_ordered(&ready_list, &t->elem, compare_priority, NULL);
 
-	// 현재 실행중인 스레드보다 높은 우선순위의 스레드가 ready_list에 추가되었을 경우
-	if (thread_current()->priority < t->priority)
-		do_schedule(THREAD_BLOCKED);
+	// 새로 만든 스레드가 현재 실행중인 스레드보다 우선순위가 높으면 바로 양보해야한다.
+	// 현재 실행중인 스레드보다 높은 우선순위의 스레드가 생성됐을 경우,
+	// 현재 스레드를 ready_list에 넣고, 생성된 스레드를 수행한다.
+	if (t->priority > thread_current()->priority)
+	{
+		// thread_yield();
+	}
 
 	intr_set_level(old_level);
 }
@@ -315,6 +322,9 @@ void thread_yield(void)
 	if (curr != idle_thread)
 		list_insert_ordered(&ready_list, &curr->elem, compare_priority, NULL);
 	do_schedule(THREAD_READY);
+
+	// curr->status = THREAD_READY;
+	// schedule();
 	intr_set_level(old_level);
 }
 
@@ -333,12 +343,14 @@ int thread_get_priority(void)
 /* Sets the current thread's nice value to NICE. */
 void thread_set_nice(int nice UNUSED)
 {
+	// printf("🟥 thread_set_nice() called in thread.c \n");
 	/* TODO: Your implementation goes here */
 }
 
 /* Returns the current thread's nice value. */
 int thread_get_nice(void)
 {
+	// printf("🟥 thread_get_nice() called in thread.c \n");
 	/* TODO: Your implementation goes here */
 	return 0;
 }
@@ -346,6 +358,7 @@ int thread_get_nice(void)
 /* Returns 100 times the system load average. */
 int thread_get_load_avg(void)
 {
+	// printf("🟥 thread_get_load_avg() called in thread.c \n");
 	/* TODO: Your implementation goes here */
 	return 0;
 }
@@ -353,6 +366,7 @@ int thread_get_load_avg(void)
 /* Returns 100 times the current thread's recent_cpu value. */
 int thread_get_recent_cpu(void)
 {
+	// printf("🟥 thread_get_recent_cpu() called in thread.c \n");
 	/* TODO: Your implementation goes here */
 	return 0;
 }
@@ -369,6 +383,7 @@ int thread_get_recent_cpu(void)
 static void
 idle(void *idle_started_ UNUSED)
 {
+	// printf("🟥 idle() called in thread.c \n");
 	struct semaphore *idle_started = idle_started_;
 
 	idle_thread = thread_current();
@@ -400,6 +415,7 @@ idle(void *idle_started_ UNUSED)
 static void
 kernel_thread(thread_func *function, void *aux)
 {
+	// printf("🟥 kernel_thread() called in thread.c \n");
 	ASSERT(function != NULL);
 
 	intr_enable(); /* The scheduler runs with interrupts off. */
@@ -412,6 +428,7 @@ kernel_thread(thread_func *function, void *aux)
 static void
 init_thread(struct thread *t, const char *name, int priority)
 {
+	// printf("🟥 init_thread() called in thread.c \n");
 	ASSERT(t != NULL);
 	ASSERT(PRI_MIN <= priority && priority <= PRI_MAX);
 	ASSERT(name != NULL);
@@ -432,6 +449,7 @@ init_thread(struct thread *t, const char *name, int priority)
 static struct thread *
 next_thread_to_run(void)
 {
+	// printf("🟥 next_thread_to_run() called in thread.c \n");
 	if (list_empty(&ready_list))
 		return idle_thread;
 	else
@@ -440,6 +458,7 @@ next_thread_to_run(void)
 
 static bool compare_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
 {
+	// printf("🟥 compare_priority() called in thread.c \n");
 	struct thread *ta = list_entry(a, struct thread, elem);
 	struct thread *tb = list_entry(b, struct thread, elem);
 	return ta->priority > tb->priority;
@@ -448,6 +467,7 @@ static bool compare_priority(const struct list_elem *a, const struct list_elem *
 /* Use iretq to launch the thread */
 void do_iret(struct intr_frame *tf)
 {
+	// printf("🟥 do_iret() called in thread.c \n");
 	__asm __volatile(
 			"movq %0, %%rsp\n"
 			"movq 0(%%rsp),%%r15\n"
@@ -551,6 +571,7 @@ do_schedule(int status)
 {
 	ASSERT(intr_get_level() == INTR_OFF);
 	ASSERT(thread_current()->status == THREAD_RUNNING);
+
 	while (!list_empty(&destruction_req))
 	{
 		struct thread *victim =
@@ -606,6 +627,7 @@ schedule(void)
 static tid_t
 allocate_tid(void)
 {
+	// printf("🟥 allocate_tid() called in thread.c \n");
 	static tid_t next_tid = 1;
 	tid_t tid;
 
