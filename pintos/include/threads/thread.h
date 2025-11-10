@@ -93,6 +93,13 @@ struct thread
 	char name[16];						 /* Name (for debugging purposes). */
 	int priority;							 /* Priority. */
 
+	/* donate 관련 */
+	int original_priority;					/* 기부받기 전에, 원래 우선순위 */
+	struct list donators;						/* 나한테 기부한 쓰레드 목록 */
+	struct lock *holding_locks;			// 내가 보유한 locks리스트
+	struct lock *waiting_lock;			// 내가 기다리는 locks
+	struct list_elem donation_elem; // donatior용 리스트에 사용
+
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem; /* List element. */
 	int64_t wakeup_tick;	 /* Wakeup tick. */
@@ -144,7 +151,8 @@ int thread_get_load_avg(void);
 
 void do_iret(struct intr_frame *tf);
 
-bool compare_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
+bool compare_ready_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
+bool compare_donation_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
 void preemption_by_priority(void);
 
 #endif /* threads/thread.h */

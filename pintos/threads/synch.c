@@ -52,7 +52,7 @@ void sema_down(struct semaphore *sema)
 	{
 		/* 	추가한 부분. week08. 11.10. project1 - priority-change TC */
 		// list_push_back(&sema->waiters, &thread_current()->elem);
-		list_insert_ordered(&sema->waiters, &thread_current()->elem, compare_priority, NULL);
+		list_insert_ordered(&sema->waiters, &thread_current()->elem, compare_ready_priority, NULL);
 		thread_block();
 	}
 	sema->value--;
@@ -96,7 +96,10 @@ void sema_up(struct semaphore *sema)
 
 	old_level = intr_disable();
 	if (!list_empty(&sema->waiters))
-	{ // 자고 있던 스레드 깨워서 ready_list에 넣는다.
+	{
+		// 가장 높은 순위의 스레드를 깨우기 위해 정렬
+		list_sort(&sema->waiters, compare_ready_priority, NULL);
+		// 자고 있던 스레드 깨워서 ready_list에 넣는다.
 		thread_unblock(list_entry(list_pop_front(&sema->waiters), struct thread, elem));
 	}
 
@@ -116,7 +119,7 @@ bool compare_sema_priority(const struct list_elem *a, const struct list_elem *b,
 
 	struct list_elem *ta = list_begin(&sa->semaphore.waiters);
 	struct list_elem *tb = list_begin(&sb->semaphore.waiters);
-	return compare_priority(ta, tb, NULL);
+	return compare_ready_priority(ta, tb, NULL);
 }
 
 static void sema_test_helper(void *sema_);
@@ -175,14 +178,64 @@ void lock_init(struct lock *lock)
 
 - 이 함수는 잠들 수 있으므로, 인터럽트 핸들러에서는 호출하면 안 됩니다.
 - 인터럽트가 꺼진 상태에서도 호출할 수 있지만, 잠들게 되면 다음에 실행되는 스레드가 인터럽트를 다시 켭니다. */
+// 1. lock이 사용중이면
+// 	- 내가 어떤 lock을 기다리는지 waiting lock에 기록
+//	- 우선순위 기부 : donate_priority()
+// 2. 내 우선순위가 holder 우선순위보다 높은가?
+//	- 높으면 donate
+//	- 낮으면 기다림
+// 3. holder가 기다리는 다른 락이 있는가?
+//	- 있으면 nested donation
+//	- 없으면 끝
 void lock_acquire(struct lock *lock)
 {
 	ASSERT(lock != NULL);
 	ASSERT(!intr_context());
 	ASSERT(!lock_held_by_current_thread(lock));
 
+	if (lock->holder != NULL) // 1. lock이 사용중인가?
+	{
+		// 내가 어떤 lock을 기다리는지 waiting lock에 기록
+		thread_current()->waiting_lock = lock;
+
+		// 기부자 명단에 현재 스레드를 추가한다.
+		list_insert_ordered(&lock->holder->donators, &thread_current()->donation_elem, compare_donation_priority, NULL);
+
+		// 재귀적 우선순위 기부
+		donate_priority(lock->holder);
+	}
+
 	sema_down(&lock->semaphore);
 	lock->holder = thread_current();
+	thread_current()->waiting_lock = NULL;
+}
+
+void donate_priority(struct thread *holder)
+{
+	// printf("🟥 donate_priority()\n");
+	struct thread *curr_thread = thread_current();
+	int depth = 0;
+	const int MAX_DEPTH = 8;
+
+	// holder가 NULL이 아니고, depth가 MAX값보다 작을 때 까지
+	while (holder != NULL && depth < MAX_DEPTH)
+	{
+		// 내 우선순위가 holder의 우선순위보다 높으면 기부
+		if (curr_thread->priority > holder->priority)
+		{
+			holder->priority = curr_thread->priority;
+		}
+		// 중첩 기부: holder가 기다리는 락이 있으면 재귀적 기부
+		if (holder->waiting_lock != NULL)
+		{
+			holder = holder->waiting_lock->holder;
+			depth++;
+		}
+		else
+		{
+			break;
+		}
+	}
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -213,8 +266,61 @@ void lock_release(struct lock *lock)
 	ASSERT(lock != NULL);
 	ASSERT(lock_held_by_current_thread(lock));
 
+	// 1. 이 lock을 기다리던 스레드의 기부 원복
+	remove_donations(lock);
+
+	// 2. 남은 기부 중에 최고 우선순위로 갱신
+	recaculate_priority();
+
+	// 3. lock 해제
 	lock->holder = NULL;
 	sema_up(&lock->semaphore);
+}
+
+/* 이 lock 관련된 donation 제거*/
+void remove_donations(struct lock *lock)
+{
+	struct thread *curr_thread = thread_current();
+	struct list_elem *e;
+
+	// donator 순회
+	e = list_begin(&curr_thread->donators);
+	while (e != list_end(&curr_thread->donators))
+	{
+		struct thread *donor = list_entry(e, struct thread, donation_elem);
+
+		// 이 donor가 현재 해제하는 lock을 기다리고 있었다면 제거
+		// donators에 있다고 해서 꼭 같은 공유자원 lock을 기다리는 것이 아니니까.
+		if (donor->waiting_lock == lock)
+		{
+			e = list_remove(e); // 제거하고 다음 elem 반환
+		}
+		else
+		{
+			e = list_next(e);
+		}
+	}
+}
+
+/* 우선순위 재계산 */
+void recaculate_priority(void)
+{
+	struct thread *curr_thread = thread_current();
+
+	// 기본 우선순위로 초기화
+	curr_thread->priority = curr_thread->original_priority;
+
+	// 남은 기부 중 최댓과 비교
+	if (!list_empty(&curr_thread->donators))
+	{
+		struct thread *top_donor = list_entry(list_front(&curr_thread->donators), struct thread, donation_elem);
+
+		// 기부받은 우선순위가 더 높으면 그것을 사용
+		if (top_donor->priority > curr_thread->priority)
+		{
+			curr_thread->priority = top_donor->priority;
+		}
+	}
 }
 
 /* Returns true if the current thread holds LOCK, false

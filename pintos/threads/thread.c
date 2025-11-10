@@ -248,7 +248,7 @@ void thread_unblock(struct thread *t)
 	// thread_create호출 > 새로 만든 스레드를 READY상태로 바꾸고, ready_list에 넣는다.
 	ASSERT(t->status == THREAD_BLOCKED);
 	t->status = THREAD_READY;
-	list_insert_ordered(&ready_list, &t->elem, compare_priority, NULL);
+	list_insert_ordered(&ready_list, &t->elem, compare_ready_priority, NULL);
 
 	intr_set_level(old_level);
 }
@@ -314,7 +314,7 @@ void thread_yield(void)
 
 	old_level = intr_disable();
 	if (curr != idle_thread)
-		list_insert_ordered(&ready_list, &curr->elem, compare_priority, NULL);
+		list_insert_ordered(&ready_list, &curr->elem, compare_ready_priority, NULL);
 
 	do_schedule(THREAD_READY);
 
@@ -336,7 +336,13 @@ void preemption_by_priority(void)
 /* 	추가한 부분. week08. 11.10. project1 - priority-change TC */
 void thread_set_priority(int new_priority)
 {
-	thread_current()->priority = new_priority;
+	// original priority 업데이트
+	thread_current()->original_priority = new_priority;
+
+	// 현재 donation 상황 고려해서 실제 우선순위 재계산
+	recaculate_priority();
+
+	// 선점 체크
 	enum intr_level old_level = intr_disable();
 	preemption_by_priority();
 	intr_set_level(old_level);
@@ -436,7 +442,6 @@ kernel_thread(thread_func *function, void *aux)
 static void
 init_thread(struct thread *t, const char *name, int priority)
 {
-	// printf("🟥 init_thread() called in thread.c \n");
 	ASSERT(t != NULL);
 	ASSERT(PRI_MIN <= priority && priority <= PRI_MAX);
 	ASSERT(name != NULL);
@@ -447,6 +452,12 @@ init_thread(struct thread *t, const char *name, int priority)
 	t->tf.rsp = (uint64_t)t + PGSIZE - sizeof(void *);
 	t->priority = priority;
 	t->magic = THREAD_MAGIC;
+
+	/* donate 관련 */
+	t->original_priority = priority;
+	list_init(&t->donators);
+	t->holding_locks = NULL;
+	t->waiting_lock = NULL;
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should
@@ -464,9 +475,26 @@ next_thread_to_run(void)
 		return list_entry(list_pop_front(&ready_list), struct thread, elem);
 }
 
-bool compare_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
+/*
+ * donators 리스트에서 사용.
+ * 각 thread의 donation_elem 멤버를 기준으로 우선순위를 비교하여 내림차순 정렬.
+ * 높은 우선순위가 리스트 앞에 오도록 반환.
+ */
+bool compare_donation_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
 {
-	// printf("🟥 compare_priority() called in thread.c \n");
+
+	struct thread *ta = list_entry(a, struct thread, donation_elem);
+	struct thread *tb = list_entry(b, struct thread, donation_elem);
+	return ta->priority > tb->priority;
+}
+
+/*
+ * ready_list, waiters 등에서 사용.
+ * 각 thread의 elem 멤버를 기준으로 우선순위를 비교하여 내림차순 정렬.
+ * 높은 우선순위가 리스트 앞에 오도록 반환.
+ */
+bool compare_ready_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
+{
 	struct thread *ta = list_entry(a, struct thread, elem);
 	struct thread *tb = list_entry(b, struct thread, elem);
 	return ta->priority > tb->priority;
