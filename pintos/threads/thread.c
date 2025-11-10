@@ -66,6 +66,7 @@ static void do_schedule(int status);
 static void schedule(void);
 static tid_t allocate_tid(void);
 static bool compare_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
+static void preemption_by_priority(void);
 
 /* Returns true if T appears to point to a valid thread. */
 #define is_thread(t) ((t) != NULL && (t)->magic == THREAD_MAGIC)
@@ -207,6 +208,15 @@ tid_t thread_create(const char *name, int priority,
 	/* Add to run queue. */
 	thread_unblock(t);
 
+	// 추가한 부분. week08. 11.10
+	// 새로 만든 스레드가 현재 실행중인 스레드보다 우선순위가 높으면 바로 양보해야한다.
+	// 현재 스레드를 ready_list에 넣고, 생성된 스레드를 수행한다.
+	/* 우선순위가 바뀌었을 때 관련 함수 */
+
+	enum intr_level old_level = intr_disable();
+	preemption_by_priority();
+	intr_set_level(old_level);
+
 	return tid;
 }
 
@@ -232,28 +242,19 @@ void thread_block(void)
 	 be important: if the caller had disabled interrupts itself,
 	 it may expect that it can atomically unblock a thread and
 	 update other data. */
-// 스레드 BLOCK
+// 이 함수는 선점을 수행하지 않는다. 선점을 수행하는 것은 caller의 책임이다.
 void thread_unblock(struct thread *t)
 {
 	enum intr_level old_level;
 
 	ASSERT(is_thread(t));
 
-	old_level = intr_disable(); //
+	old_level = intr_disable();
 
 	// thread_create호출 > 새로 만든 스레드를 READY상태로 바꾸고, ready_list에 넣는다.
 	ASSERT(t->status == THREAD_BLOCKED);
 	t->status = THREAD_READY;
 	list_insert_ordered(&ready_list, &t->elem, compare_priority, NULL);
-
-	// 추가한 부분. week08. 11.10
-	// 새로 만든 스레드가 현재 실행중인 스레드보다 우선순위가 높으면 바로 양보해야한다.
-	// 현재 실행중인 스레드보다 높은 우선순위의 스레드가 생성됐을 경우,
-	// 현재 스레드를 ready_list에 넣고, 생성된 스레드를 수행한다.
-	if (t->priority > thread_current()->priority)
-	{
-		// thread_yield();
-	}
 
 	intr_set_level(old_level);
 }
@@ -314,22 +315,37 @@ void thread_yield(void)
 	struct thread *curr = thread_current();
 	enum intr_level old_level;
 
-	ASSERT(!intr_context());
+	// inter_context = 0>> false
+	ASSERT(!intr_context()); // 인터럽트 컨텍스트가 아니다! 일반 컨텍스트다.
 
 	old_level = intr_disable();
 	if (curr != idle_thread)
 		list_insert_ordered(&ready_list, &curr->elem, compare_priority, NULL);
+
 	do_schedule(THREAD_READY);
 
-	// curr->status = THREAD_READY;
-	// schedule();
 	intr_set_level(old_level);
 }
 
+/* 현재 실행중인 스레드의 우선순위가 ready_list에서 가장 큰 우선순위를 가진 스레드보다 낮다면 바로 양보 */
+/* 우선순위가 바뀌었을 때 관련 함수 */
+static void preemption_by_priority(void)
+{
+	if (!list_empty(&ready_list) &&
+			thread_current()->priority < list_entry(list_front(&ready_list), struct thread, elem)->priority)
+	{
+		thread_yield();
+	}
+}
+
 /* Sets the current thread's priority to NEW_PRIORITY. */
+/* 우선순위가 바뀌었을 때 관련 함수 */
 void thread_set_priority(int new_priority)
 {
 	thread_current()->priority = new_priority;
+	enum intr_level old_level = intr_disable();
+	preemption_by_priority();
+	intr_set_level(old_level);
 }
 
 /* Returns the current thread's priority. */
