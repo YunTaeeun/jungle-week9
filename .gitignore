@@ -13,6 +13,10 @@
 *.hex
 *.dis
 *.dump
+.devcontainer/Dockerfile
+*.md
+*.txt
+
 
 # 빌드 디렉터리
 **/build/
