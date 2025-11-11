@@ -118,20 +118,44 @@ void thread_init(void)
 	initial_thread->tid = allocate_tid();
 }
 
-/* Starts preemptive thread scheduling by enabling interrupts.
-	 Also creates the idle thread. */
+/**
+ * @brief 선점형 스레드 스케줄링을 시작하는 함수
+ *
+ * @details 이 함수는 idle 스레드를 생성하고, 인터럽트를 활성화하여
+ *          스케줄러를 동작시키며, idle 스레드 초기화가 완료될 때까지 대기합니다.
+ *          main()에서 thread_init() 이후에 호출됩니다.
+ *
+ * @note 이 함수가 반환되면 스레드 시스템이 정상 작동하며,
+ *       타이머 인터럽트를 통해 스레드 스케줄링이 자동으로 이루어집니다.
+ */
 void thread_start(void)
 {
-	/* Create the idle thread. */
+	// idle 스레드 초기화 완료를 기다리기 위한 세마포어 선언
 	struct semaphore idle_started;
 	sema_init(&idle_started, 0);
-	thread_create("idle", PRI_MIN, idle, &idle_started);
 
-	/* Start preemptive thread scheduling. */
+	/* 세마포어 초기값 검증 */
+	ASSERT(idle_started.value == 0);
+
+	// idle 스레드 생성 → ready_list에 추가
+	tid_t idle_tid = thread_create("idle", PRI_MIN, idle, &idle_started);
+
+	/* idle 스레드 생성 성공 확인 */
+	ASSERT(idle_tid != TID_ERROR);
+
+	// 인터럽트를 활성화하여 타이머 인터럽트 기반 스케줄링 시작
 	intr_enable();
 
-	/* Wait for the idle thread to initialize idle_thread. */
+	/* 인터럽트가 활성화되었는지 확인 */
+	// 스케줄러가 정상 동작하려면 인터럽트가 켜진 상태(INTR_ON)여야 함
+	ASSERT(intr_get_level() == INTR_ON);
+
+	// idle 스레드가 초기화를 완료하고 sema_up()을 호출할 때까지 메인 스레드를 대기시킴
 	sema_down(&idle_started);
+
+	/* idle_thread가 제대로 초기화 되었는지 확인 */
+	// 전역 idle_thread 포인터가 NULL이 아닌지 검증
+	ASSERT(idle_thread != NULL);
 }
 
 /* Called by the timer interrupt handler at each timer tick.
@@ -160,55 +184,69 @@ void thread_print_stats(void)
 {
 }
 
-/* Creates a new kernel thread named NAME with the given initial
-	 PRIORITY, which executes FUNCTION passing AUX as the argument,
-	 and adds it to the ready queue.  Returns the thread identifier
-	 for the new thread, or TID_ERROR if creation fails.
-
-	 If thread_start() has been called, then the new thread may be
-	 scheduled before thread_create() returns.  It could even exit
-	 before thread_create() returns.  Contrariwise, the original
-	 thread may run for any amount of time before the new thread is
-	 scheduled.  Use a semaphore or some other form of
-	 synchronization if you need to ensure ordering.
-
-	 The code provided sets the new thread's `priority' member to
-	 PRIORITY, but no actual priority scheduling is implemented.
-	 Priority scheduling is the goal of Problem 1-3. */
+/**
+ * @brief 새로운 커널 스레드를 생성하고 ready queue에 추가하는 함수
+ *
+ * @param name 생성할 스레드의 이름
+ * @param priority 스레드의 초기 우선순위 (높을수록 먼저 실행)
+ * @param function 스레드가 실행할 함수 (스레드의 main 역할)
+ * @param aux function에 전달될 인자 (보통 동기화용 세마포어 등)
+ *
+ * @return tid_t 생성된 스레드의 ID (TID_ERROR: 생성 실패)
+ *
+ * @details 이 함수는 새로운 커널 스레드를 생성하고 ready_list에 추가합니다.
+ *          thread_start()가 호출된 후에는 thread_create()가 반환되기 전에
+ *          새 스레드가 스케줄링될 수 있으며, 심지어 종료될 수도 있습니다.
+ *          반대로 원래 스레드가 새 스레드가 스케줄되기 전에 계속 실행될 수도 있습니다.
+ *          실행 순서를 보장하려면 세마포어 등의 동기화 기법을 사용해야 합니다.
+ *
+ * @warning function이 NULL이면 ASSERT 실패로 커널 패닉이 발생합니다.
+ */
 tid_t thread_create(const char *name, int priority,
 										thread_func *function, void *aux)
 {
 	struct thread *t;
 	tid_t tid;
 
+	// 실행할 함수가 NULL이 아닌지 검증
 	ASSERT(function != NULL);
 
-	/* Allocate thread. */
+	/* ------- 스레드 메모리 할당 ------- */
+	// 페이지 단위로 메모리를 할당하고 0으로 초기화
 	t = palloc_get_page(PAL_ZERO);
 	if (t == NULL)
-		return TID_ERROR;
+		return TID_ERROR; // 메모리 부족 시 실패 반환
 
-	/* Initialize thread. */
+	/* ------- 스레드 구조체 초기화 ------- */
+	// 스레드 이름, 우선순위, 기본 상태 등을 설정
 	init_thread(t, name, priority);
+
+	// 전역 고유 TID 할당
 	tid = t->tid = allocate_tid();
 
-	/* Call the kernel_thread if it scheduled.
-	 * Note) rdi is 1st argument, and rsi is 2nd argument. */
+	/* ------- 스레드 실행 컨텍스트 설정 ------- */
+	// kernel_thread가 스케줄될 때 첫 실행 지점으로 설정
 	t->tf.rip = (uintptr_t)kernel_thread;
-	t->tf.R.rdi = (uint64_t)function;
-	t->tf.R.rsi = (uint64_t)aux;
+	t->tf.R.rdi = (uint64_t)function; // 첫 번째 인자: 실행할 함수 포인터
+	t->tf.R.rsi = (uint64_t)aux;			// 두 번째 인자: 함수에 전달할 보조 파라미터
+
+	// 세그먼트 레지스터 설정 (커널 모드)
 	t->tf.ds = SEL_KDSEG;
 	t->tf.es = SEL_KDSEG;
 	t->tf.ss = SEL_KDSEG;
 	t->tf.cs = SEL_KCSEG;
+
+	// 인터럽트 플래그 활성화 (스케줄러는 인터럽트 비활성화 상태에서 실행)
 	t->tf.eflags = FLAG_IF;
 
-	/* Add to run queue. */
+	/* ------- ready queue에 추가 ------- */
+	// 스레드를 THREAD_READY 상태로 변경하고 ready_list에 추가
 	thread_unblock(t);
 
-	/* 	추가한 부분. week08. 11.10. project1 - priority-change TC */
+	/* ------- Priority Scheduling 구현 (week08. project1- priority-cha nge TC) ------- */
+	// 새로 생성된 스레드가 현재 스레드보다 우선순위가 높으면 CPU 양보
 	enum intr_level old_level = intr_disable();
-	preemption_by_priority();
+	preemption_by_priority(); // 우선순위 기반 선점 스케줄링 실행
 	intr_set_level(old_level);
 
 	return tid;
@@ -321,30 +359,78 @@ void thread_yield(void)
 	intr_set_level(old_level);
 }
 
-/* 현재 실행중인 스레드의 우선순위가 ready_list에서 가장 큰 우선순위를 가진 스레드보다 낮다면 바로 양보 */
-/* 	추가한 부분. week08. 11.10. project1 - priority-change TC */
+/**
+ * @brief 우선순위 기반 선점 스케줄링을 수행하는 함수
+ *
+ * @details 현재 실행 중인 스레드의 우선순위가 ready_list의 최상위(가장 높은)
+ *          우선순위 스레드보다 낮은 경우, 즉시 CPU를 양보하여 선점 스케줄링을
+ *          수행합니다.
+ *
+ * @note 이 함수는 다음 상황에서 호출되어야 합니다:
+ *       - 새로운 스레드가 생성되어 ready_list에 추가될 때 (thread_create)
+ *       - blocked 스레드가 unblock되어 ready_list에 추가될 때 (thread_unblock)
+ *       - 현재 스레드의 우선순위가 동적으로 변경될 때 (thread_set_priority)
+ *
+ * @warning 이 함수를 호출하기 전에 반드시 인터럽트를 비활성화해야 합니다.
+ *          원자적(atomic) 연산을 보장하지 않으면 race condition이 발생할 수 있습니다.
+ *
+ * @see thread_yield()
+ * @see thread_create()
+ * @see thread_set_priority()
+ *
+ * @since Week08, 2025-11-10, Project 1 - priority-change TC
+ */
 void preemption_by_priority(void)
 {
+	// ready_list가 비어있지 않은지 확인
+	// (실행 가능한 다른 스레드가 존재하는지 체크)
 	if (!list_empty(&ready_list) &&
+			// 현재 스레드의 우선순위와 ready_list 최상위 스레드의 우선순위 비교
 			thread_current()->priority < list_entry(list_front(&ready_list), struct thread, elem)->priority)
 	{
+		// 현재 스레드보다 우선순위가 높은 스레드가 있으면 즉시 CPU 양보
 		thread_yield();
 	}
 }
 
-/* Sets the current thread's priority to NEW_PRIORITY. */
-/* 	추가한 부분. week08. 11.10. project1 - priority-change TC */
+/**
+ * @brief 현재 스레드의 우선순위를 변경하는 함수
+ *
+ * @param new_priority 설정할 새로운 우선순위 값
+ *
+ * @details 이 함수는 현재 실행 중인 스레드의 우선순위를 new_priority로 설정하고,
+ *          우선순위 기부 상황을 고려하여 실제 우선순위를 재계산합니다.
+ * 					우선순위 변경 후, 현재 스레드보다 높은 우선순위를 가진
+ *          스레드가 ready_list에 있다면 즉시 CPU를 양보합니다.
+ *
+ * @note Priority Donation 동작:
+ *       - original_priority: 스레드 본래의 우선순위 (기부받지 않은 기본값)
+ *       - priority: 실제 실행 우선순위 (기부받은 우선순위 중 최댓값)
+ *       - 우선순위가 낮아져서 더 이상 최고 우선순위가 아니면 CPU를 즉시 양보
+ *
+ * @warning 이 함수는 현재 스레드에만 적용되며, 다른 스레드의 우선순위는 변경하지 않습니다.
+ *          또한 인터럽트를 일시적으로 비활성화하여 원자적 연산을 보장합니다.
+ *
+ * @see recaculate_priority()
+ * @see preemption_by_priority()
+ * @see thread_get_priority()
+ *
+ * @since Week08, 2025-11-10, Project 1 - priority-change TC
+ */
 void thread_set_priority(int new_priority)
 {
-	// original priority 업데이트
+	// 스레드의 본래(original) 우선순위 업데이트
+	// (우선순위 기부가 끝나면 이 값으로 복원됨)
 	thread_current()->original_priority = new_priority;
 
-	// 현재 donation 상황 고려해서 실제 우선순위 재계산
+	// 우선순위 기부(donation) 상황을 고려하여 실제 우선순위 재계산
+	// 여러 스레드로부터 기부받은 우선순위 중 최댓값을 선택
 	recaculate_priority();
 
-	// 선점 체크
+	// 우선순위 변경 후 선점 스케줄링 체크
+	// (더 높은 우선순위 스레드가 있으면 CPU 양보)
 	enum intr_level old_level = intr_disable();
-	preemption_by_priority();
+	preemption_by_priority(); // 선점 여부 확인 및 실행
 	intr_set_level(old_level);
 }
 
