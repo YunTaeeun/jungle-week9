@@ -10,6 +10,7 @@
 #include "threads/io.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
+#include "threads/fixed-point.h"
 
 /* ====================================================================
    이 파일에서 사용되는 기본 함수/매크로 설명
@@ -118,6 +119,7 @@ static intr_handler_func timer_interrupt;
 static bool too_many_loops (unsigned loops);
 static void busy_wait (int64_t loops);
 static void real_time_sleep (int64_t num, int32_t denom);
+
 static struct list sleep_list; // 블락 된 스레드 관리 리스트
 
 /* 8254 프로그래머블 간격 타이머(PIT)를 초당 PIT_FREQ번
@@ -326,39 +328,66 @@ void timer_print_stats (void) {
 static void timer_interrupt (struct intr_frame *args UNUSED) {
 	ticks++;
 	thread_tick ();
+   bool yield_needed = false;
+   struct thread *cur_thread = thread_current ();
 
-	if (list_empty(&sleep_list))
-		return;
-	
-	bool yield_needed = false;
-	struct thread *cur_thread = thread_current ();
-	
-	while (!list_empty(&sleep_list)) {
-		struct list_elem *e = list_front(&sleep_list);
-		struct thread *t = list_entry(e, struct thread, elem);
-		if (t->wakeup_tick <= ticks) {
-			list_pop_front(&sleep_list);
-			thread_unblock(t); // 해당 스레드를 블록 해제
-         if (t->priority > cur_thread->priority) {
-            yield_needed = true; // yield 필요 표시
-         }
-      } else {
-         break;
+   // MLFQS 스케줄러 업데이트
+   if(thread_mlfqs) {
+      // 1틱마다: 현재 스레드의 recent_cpu +1
+      if(cheak_idle_thread(cur_thread))
+         cur_thread->recent_cpu = FP_ADD_INT(cur_thread->recent_cpu, 1);
+
+      // 100틱마다: load_avg와 모든 스레드 priority,recent_cpu 재계산
+      if (ticks % TIMER_FREQ == 0) {
+         mlfqs_calculate_load_avg(cur_thread);
+         thread_foreach(mlfqs_calculate_recent_cpu, NULL, cur_thread);
+         thread_foreach(mlfqs_calculate_priority, NULL, cur_thread);
+      }
+      // 4틱마다 : 모든 스레드 priority 재계산
+      else if (ticks % 4 == 0) {
+         thread_foreach(mlfqs_calculate_priority, NULL, cur_thread);
       }
    }
-   
+
+   // sleep_list 처리 (MLFQS 모드와 관계없이 항상 처리)
+   if (!list_empty(&sleep_list)) {
+      while (!list_empty(&sleep_list)) {
+         struct list_elem *e = list_front(&sleep_list);
+         struct thread *t = list_entry(e, struct thread, elem);
+         if (t->wakeup_tick <= ticks) {
+            list_pop_front(&sleep_list);
+            thread_unblock(t); // 해당 스레드를 블록 해제
+            if (t->priority > cur_thread->priority) {
+               yield_needed = true; // yield 필요 표시
+            }
+         } else {
+            break;
+         }
+      }
+   }
+
    if (yield_needed) {
-		intr_yield_on_return(); // 인터럽트 종료 시 yield
-	}
+      intr_yield_on_return(); // 인터럽트 종료 시 yield
+   }
 }
 
-// static void timer_interrupt (struct intr_frame *args UNUSED) {
-// 	ticks++;
-// 	thread_tick ();
-	
-// 	// thread_awake() 호출로 대체
-// 	thread_awake(ticks);
-// }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 /* LOOPS번의 반복이 하나 이상의 타이머 틱을 기다리면

@@ -287,7 +287,7 @@ lock_acquire (struct lock *lock) {
    struct thread *curr_thread = thread_current ();
 
    
-   if (lock->holder != NULL) { // 다른 놈이 가지고 있어서 기다려야 되는 상황이면면
+   if (!thread_mlfqs && lock->holder != NULL) { // 다른 놈이 가지고 있어서 기다려야 되는 상황이면면
       curr_thread->waiting_lock = lock; // 기다리는 락에 넣고
       donate_priority(lock->holder); // 필요하면 도네이션이 일어나도록
    }

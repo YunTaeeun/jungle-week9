@@ -10,6 +10,7 @@
 #include "threads/palloc.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
+#include "threads/fixed-point.h"
 #include "intrinsic.h"
 #ifdef USERPROG
 #include "userprog/process.h"
@@ -36,9 +37,11 @@
    실행 준비가 되어 있지만 실제로 실행 중은 아닌 프로세스들을 담습니다. */
 static struct list ready_list;
 
+/* List of all processes. */
+/* 모든 프로세스의 리스트입니다. */
+static struct list all_list;
 
-
-static int load_avg;  // 시스템 전체 load average (고정소수점)
+static int64_t load_avg;  // 시스템 전체 load average (고정소수점)
 
 /* List of processes in THREAD_BLOCKED state, that is, processes
    that are blocked and waiting for an event to trigger. */
@@ -88,6 +91,7 @@ static void do_schedule(int status);
 static void schedule (void);
 static tid_t allocate_tid (void);
 static bool compare_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
+bool cheak_idle_thread(struct thread *cur_thread);
 
 /* Returns true if T appears to point to a valid thread. */
 #define is_thread(t) ((t) != NULL && (t)->magic == THREAD_MAGIC)
@@ -144,7 +148,9 @@ thread_init (void) {
 	/* Init the globla thread context */
 	lock_init (&tid_lock);
 	list_init (&ready_list);
+	list_init (&all_list);
 	list_init (&destruction_req);
+	load_avg = 0;  // load_avg 초기화
 
 	/* Set up a thread structure for the running thread. */
 	initial_thread = running_thread ();
@@ -403,6 +409,9 @@ thread_yield (void) {
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void
 thread_set_priority (int new_priority) {
+	if (thread_mlfqs) {
+		return;
+	}
 	struct thread *cur_thread = thread_current ();
 
 	if(cur_thread->original_priority == cur_thread->priority) {// 도네이션이 없는 상황
@@ -434,40 +443,109 @@ thread_get_priority (void) {
 }
 
 /* Sets the current thread's nice value to NICE. */
+/* 현재 스레드의 nice 값을 NICE로 설정합니다. */
 void
 thread_set_nice (int nice UNUSED) {
+	struct thread *t = thread_current();
+	t->nice = nice;
 	/* TODO: Your implementation goes here */
 }
 
 /* Returns the current thread's nice value. */
+/* 현재 스레드의 nice 값을 반환합니다. */
 int
 thread_get_nice (void) {
 	/* TODO: Your implementation goes here */
-	return 0;
+	return thread_current ()->nice;
 }
 
 /* Returns 100 times the system load average. */
+/* 시스템 로드 평균의 100배를 반환합니다. */
 int
 thread_get_load_avg (void) {
-	/* TODO: Your implementation goes here */
-	return 0;
+	return FP_TO_INT_NEAR(FP_MULT_INT(load_avg,100));
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
+/* 현재 스레드의 recent_cpu 값의 100배를 반환합니다. */
 int
 thread_get_recent_cpu (void) {
-	/* TODO: Your implementation goes here */
-	return 0;
+	struct thread *t = thread_current();
+	return FP_TO_INT_NEAR(FP_MULT_INT(t->recent_cpu,100));
 }
 
+void thread_foreach(thread_action_func *func, void *aux, struct thread *cur_thread UNUSED) {
+    struct list_elem *e;
+    
+    ASSERT(func != NULL);
+    
+    // 모든 스레드를 순회 (all_list)
+    for (e = list_begin(&all_list); e != list_end(&all_list); e = list_next(e)) {
+        struct thread *t = list_entry(e, struct thread, allelem);
+        func(t, aux);
+    }
+}
+
+// 레디 리스트를 정렬 해주는 다른 파일에서 쓸수 있는 함수
+void sorted_ready_list(void) {
+    list_sort(&ready_list, compare_priority, NULL);
+}
+
+bool cheak_idle_thread(struct thread *cur_thread) {
+    if(cur_thread == idle_thread) return false;
+	return true;
+}
+
+
+
+
+
+
+
+
 /* 스레드의 priority를 계산하는 헬퍼 함수 */
-void mlfqs_calculate_priority (struct thread *t) {}
+void mlfqs_calculate_priority (struct thread *t, void *aux UNUSED) { 
+    if (t == idle_thread) return;  // idle_thread는 제외
+    if (t->status == THREAD_DYING) return;  // dying 스레드는 제외
+    
+	int calculate_priority = FP_TO_INT_NEAR(FP_DIV_INT(t->recent_cpu, 4)) + (t->nice * 2);
+	t->priority = PRI_MAX - calculate_priority;
+	if (t->priority < PRI_MIN) t->priority = PRI_MIN;
+	if (t->priority > PRI_MAX) t->priority = PRI_MAX;
+}
 
 /* 스레드의 recent_cpu를 계산하는 헬퍼 함수 */
-void mlfqs_calculate_recent_cpu (struct thread *t) {}
+void mlfqs_calculate_recent_cpu (struct thread *t, void *aux UNUSED) { 
+    if (t == idle_thread) return;  // idle_thread는 제외
+    if (t->status == THREAD_DYING) return;  // dying 스레드는 제외
+    
+    int calculate_recent_cpu = FP_MULT(
+        FP_DIV(FP_MULT_INT(load_avg, 2), FP_ADD_INT(FP_MULT_INT(load_avg, 2), 1)), 
+        t->recent_cpu
+    ) + INT_TO_FP(t->nice);
+    t->recent_cpu = calculate_recent_cpu;
+}
 
-/* 시스템 load_avg를 계산하는 헬퍼 함수 */
-void mlfqs_calculate_load_avg (void) {}
+/* 시스템 load_avg를 계산하는 헬퍼 함수 
+	load_avg = (59/60) * load_avg + (1/60) * ready_threads
+*/
+void mlfqs_calculate_load_avg (struct thread *cur_thread) {
+	// ready_list의 크기 + 현재 실행 중인 스레드(idle_thread 제외) = ready_threads
+	int ready_count = list_size(&ready_list);
+	int cur_count = (cur_thread != idle_thread ? 1 : 0);
+	int ready_threads = ready_count + cur_count;
+	
+	// load_avg 계산
+    load_avg = FP_ADD(
+       FP_DIV_INT(FP_MULT_INT(load_avg, 59), 60),
+        FP_DIV_INT(INT_TO_FP(ready_threads), 60)
+); 
+	
+}
+
+
+
+
 
 
 
@@ -542,11 +620,29 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->status = THREAD_BLOCKED;
 	strlcpy (t->name, name, sizeof t->name);
 	t->tf.rsp = (uint64_t) t + PGSIZE - sizeof (void *);
-	t->priority = priority;
+	t->magic = THREAD_MAGIC;  // magic을 먼저 설정!
+
+	if (thread_mlfqs) {
+		// 현재 실행 중인 스레드가 유효한지 확인
+		struct thread *cur = running_thread();
+		if (cur != NULL && is_thread(cur)) {
+			t->nice = cur->nice;
+			t->recent_cpu = cur->recent_cpu;
+		} else {
+			// 초기 스레드의 경우 기본값 사용
+			t->nice = 0;
+			t->recent_cpu = 0;
+		}
+        mlfqs_calculate_priority(t, NULL);
+    } else {	
+        t->priority = priority;
+    }
 	t->original_priority = priority;
-	t->magic = THREAD_MAGIC;
 	t->waiting_lock = NULL;
 	list_init(&t->holding_locks);
+	
+	/* Add to all threads list */
+	list_push_back(&all_list, &t->allelem);
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should
@@ -694,6 +790,7 @@ do_schedule(int status) {
 	while (!list_empty (&destruction_req)) {
 		struct thread *victim =
 			list_entry (list_pop_front (&destruction_req), struct thread, elem);
+		list_remove (&victim->allelem);  // all_list에서도 제거
 		palloc_free_page(victim);
 	}
 	thread_current ()->status = status;

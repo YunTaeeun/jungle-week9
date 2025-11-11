@@ -1,9 +1,10 @@
 #ifndef THREADS_THREAD_H
 #define THREADS_THREAD_H
 
-#include <debug.h>
-#include <list.h>
+#include "../lib/debug.h"
 #include <stdint.h>
+#include <stddef.h>
+#include "../lib/kernel/list.h"
 #include "threads/interrupt.h"
 #ifdef VM
 #include "vm/vm.h"
@@ -143,6 +144,8 @@ struct thread {
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem;              /* List element. */
 	                                    /* 리스트 원소(실행 큐 혹은 대기 큐에서 사용). */
+	struct list_elem allelem;           /* List element for all threads list. */
+	                                    /* 모든 스레드 리스트용 원소. */
 	int64_t wakeup_tick;                /* Wakeup tick. */
 	                                    /* 깨어날 시각(틱). */
 
@@ -179,6 +182,7 @@ void thread_tick (void);
 void thread_print_stats (void);
 
 typedef void thread_func (void *aux);
+typedef void thread_action_func (struct thread *t, void *aux);
 tid_t thread_create (const char *name, int priority, thread_func *, void *);
 
 void thread_block (void);
@@ -198,6 +202,13 @@ int thread_get_nice (void);
 void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
+void mlfqs_calculate_priority (struct thread *, void *aux);
+void mlfqs_calculate_recent_cpu (struct thread *, void *aux);
+void mlfqs_calculate_load_avg (struct thread *cur_thread);
+void thread_foreach(thread_action_func *func, void *aux, struct thread *cur_thread);
+void sorted_ready_list(void);
+bool cheak_idle_thread(struct thread *cur_thread);
+
 
 void do_iret (struct intr_frame *tf);
 

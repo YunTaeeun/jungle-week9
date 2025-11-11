@@ -17,10 +17,29 @@ for t in priority-{sema,condvar}; do make tests/threads/$t.result; done
 
 cd .. && make clean && make && cd build && for t in priority-{change,fifo,preempt,sema,condvar}; do make tests/threads/$t.result; done
 
+cd .. && clear && make clean && make && cd build && for t in mlfqs-{load-1,load-60,load-avg,recent-1,fair-2,fair-20,nice-2,nice-10,block}; do make tests/threads/mlfqs/$t.result; done
+
+
+
+# 모든 MLFQS 테스트 결과 확인
+grep -H "pass\|FAIL" tests/threads/mlfqs/*.result
+
+
+# 모든 MLFQS 테스트 실행
+for t in mlfqs-{load-1,load-60,load-avg,recent-1,fair-2,fair-20,nice-2,nice-10,block}; do make tests/threads/mlfqs/$t.result; done
+
+for t in mlfqs-{load-1,load-60,load-avg}; do make tests/threads/mlfqs/$t.result; done
+make tests/threads/mlfqs/mlfqs-recent-1.result
+for t in mlfqs-{fair-2,fair-20}; do make tests/threads/mlfqs/$t.result; done
+for t in mlfqs-{nice-2,nice-10}; do make tests/threads/mlfqs/$t.result; done
+make tests/threads/mlfqs/mlfqs-block.result
+
+
 
 
 
 priority-change, priority-preempt, priority-fifo, priority-sema, priority-condvar,
+
 
 
 
