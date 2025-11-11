@@ -329,15 +329,26 @@ static void timer_interrupt (struct intr_frame *args UNUSED) {
 
 	if (list_empty(&sleep_list))
 		return;
+	
+	bool yield_needed = false;
+	struct thread *cur_thread = thread_current ();
+	
 	while (!list_empty(&sleep_list)) {
 		struct list_elem *e = list_front(&sleep_list);
 		struct thread *t = list_entry(e, struct thread, elem);
 		if (t->wakeup_tick <= ticks) {
 			list_pop_front(&sleep_list);
 			thread_unblock(t); // 해당 스레드를 블록 해제
-		} else {
-			break;
-		}
+         if (t->priority > cur_thread->priority) {
+            yield_needed = true; // yield 필요 표시
+         }
+      } else {
+         break;
+      }
+   }
+   
+   if (yield_needed) {
+		intr_yield_on_return(); // 인터럽트 종료 시 yield
 	}
 }
 
