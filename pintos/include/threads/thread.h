@@ -136,6 +136,10 @@ struct thread {
 	int original_priority;				// 처음 부여 받는 우선순위
 	struct list holding_locks;			// 내가 보유한 락 리스트
 	struct lock *waiting_lock;			// 내가 기다리는 락
+
+	int nice;							// Nice 값 (-20 ~ 20)
+    int recent_cpu;                     // 최근 CPU 사용량 (고정소수점) (17.14)
+
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem;              /* List element. */
 	                                    /* 리스트 원소(실행 큐 혹은 대기 큐에서 사용). */
