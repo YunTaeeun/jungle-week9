@@ -11,6 +11,7 @@
 #include "threads/synch.h"
 #include "threads/thread.h"
 
+
 /* ====================================================================
    이 파일에서 사용되는 기본 함수/매크로 설명
    ====================================================================
@@ -323,33 +324,74 @@ void timer_print_stats (void) {
    - 하드웨어 타이머가 주기적으로 인터럽트를 발생시킬 때마다 호출됨
    - ticks를 증가시켜 시간을 추적하고, thread_tick()을 호출하여 스케줄링 수행
    - 매 TIMER_FREQ번(초당 100번) 호출되어 OS의 시간 개념을 제공 */
-static void timer_interrupt (struct intr_frame *args UNUSED) {
-	ticks++;
-	thread_tick ();
+/* threads/timer.c */
 
-	if (list_empty(&sleep_list))
-		return;
-	
-	bool yield_needed = false;
-	struct thread *cur_thread = thread_current ();
-	
-	while (!list_empty(&sleep_list)) {
-		struct list_elem *e = list_front(&sleep_list);
-		struct thread *t = list_entry(e, struct thread, elem);
-		if (t->wakeup_tick <= ticks) {
-			list_pop_front(&sleep_list);
-			thread_unblock(t); // 해당 스레드를 블록 해제
-         if (t->priority > cur_thread->priority) {
-            yield_needed = true; // yield 필요 표시
-         }
-      } else {
-         break;
-      }
-   }
+// ⭐️ MLFQS 헬퍼 함수들을 호출해야 하므로
+//    파일 상단에 #include "threads/thread.h"가 필요합니다.
+#include "threads/thread.h" 
+
+/* ... (다른 includes) ... */
+
+static void
+timer_interrupt (struct intr_frame *args UNUSED) {
+  ticks++; // 1. 시간 증가
+
+  // --- [ 1. MLFQS 로직 ] ---
+  if (thread_mlfqs) {
+    struct thread *cur_thread = thread_current();
+
+    // 1-1. 매 틱마다: recent_cpu 1 증가 (idle 제외)
+    if (cur_thread != idle_thread) {
+      cur_thread->recent_cpu = FP_ADD_INT(cur_thread->recent_cpu, 1);
+    }
+
+    // 1-2. 매 1초(TIMER_FREQ)마다: load_avg, 모든 recent_cpu 재계산
+    if (ticks % TIMER_FREQ == 0) {
+      mlfqs_calculate_load_avg();
+      // 모든 쓰레드 순회 함수 -> 만들어 주면 됨
+      mlfqs_recalculate_all_recent_cpu(); 
+    }
+
+    // 1-3. 매 4틱(TIME_SLICE)마다: 모든 priority 재계산
+    if (ticks % 4 == 0) {
+      // 모든 쓰레드 순회 함수 -> 만들어 주면 됨
+      mlfqs_recalculate_all_priorities();
+    }
+  }
+
+  // --- [ 2. 기본 스케줄러 (Round Robin / 선점) 로직 ] ---
+  // (MLFQS가 우선순위를 갱신한 직후에 선점을 확인해야 함)
+  thread_tick (); 
+
+  // --- [ 3. Alarm Clock (timer_sleep) 로직 ] ---
+  // (sleep_list가 비어있어도 MLFQS 로직은 실행되어야 하므로,
+  //  return 위치를 여기로 옮깁니다.)
+  if (list_empty(&sleep_list)) {
+      return; 
+  }
    
-   if (yield_needed) {
-		intr_yield_on_return(); // 인터럽트 종료 시 yield
-	}
+  bool yield_needed = false;
+  // ⭐️ 변수명 충돌 수정
+  struct thread *cur_thread_for_sleep = thread_current (); 
+   
+  while (!list_empty(&sleep_list)) {
+    struct list_elem *e = list_front(&sleep_list);
+    struct thread *t = list_entry(e, struct thread, elem);
+
+    if (t->wakeup_tick <= ticks) {
+      list_pop_front(&sleep_list);
+      thread_unblock(t); 
+      if (t->priority > cur_thread_for_sleep->priority) {
+        yield_needed = true; 
+      }
+    } else {
+      break;
+    }
+  }
+   
+  if (yield_needed) {
+    intr_yield_on_return(); 
+  }
 }
 
 // static void timer_interrupt (struct intr_frame *args UNUSED) {

@@ -137,9 +137,8 @@ struct thread {
 	struct list holding_locks;			// 내가 보유한 락 리스트
 	struct lock *waiting_lock;			// 내가 기다리는 락
 
-	int nice;							// Nice 값 (-20 ~ 20)
-    int recent_cpu;                     // 최근 CPU 사용량 (고정소수점) (17.14)
-
+	int nice;														// Nice 값 (-20 ~ 20)
+  int recent_cpu;                     // 최근 CPU 사용량 (고정소수점) (17.14)
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem;              /* List element. */
 	                                    /* 리스트 원소(실행 큐 혹은 대기 큐에서 사용). */
@@ -163,6 +162,8 @@ struct thread {
 	unsigned magic;                     /* Detects stack overflow. */
 	                                    /* 스택 오버플로우 감지를 위한 매직 값. */
 };
+// idle thread 전역 선언
+extern struct thread *idle_thread;
 
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.
@@ -200,5 +201,7 @@ int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
 
 void do_iret (struct intr_frame *tf);
+void mlfqs_calculate_priority (struct thread *t); // thread.c -> timer.c 위해 전역 함수 선언
+void mlfqs_calculate_recent_cpu (struct thread *t);
 
 #endif /* threads/thread.h */

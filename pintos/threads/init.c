@@ -219,6 +219,7 @@ parse_options (char **argv) {
 #endif
 		else if (!strcmp (name, "-rs"))
 			random_init (atoi (value));
+			// 여기서 pasre 해서 true 로 바꿔줌 !
 		else if (!strcmp (name, "-mlfqs"))
 			thread_mlfqs = true;
 #ifdef USERPROG
