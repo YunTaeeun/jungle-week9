@@ -15,6 +15,7 @@
 #include "userprog/process.h"
 #endif
 
+
 /* Random value for struct thread's `magic' member.
    Used to detect stack overflow.  See the big comment at the top
    of thread.h for details. */
@@ -34,6 +35,10 @@
 /* THREAD_READY 상태에 있는 프로세스들의 리스트로,
    실행 준비가 되어 있지만 실제로 실행 중은 아닌 프로세스들을 담습니다. */
 static struct list ready_list;
+
+
+
+static int load_avg;  // 시스템 전체 load average (고정소수점)
 
 /* List of processes in THREAD_BLOCKED state, that is, processes
    that are blocked and waiting for an event to trigger. */
@@ -454,6 +459,20 @@ thread_get_recent_cpu (void) {
 	/* TODO: Your implementation goes here */
 	return 0;
 }
+
+/* 스레드의 priority를 계산하는 헬퍼 함수 */
+void mlfqs_calculate_priority (struct thread *t) {}
+
+/* 스레드의 recent_cpu를 계산하는 헬퍼 함수 */
+void mlfqs_calculate_recent_cpu (struct thread *t) {}
+
+/* 시스템 load_avg를 계산하는 헬퍼 함수 */
+void mlfqs_calculate_load_avg (void) {}
+
+
+
+
+
 
 /* Idle thread.  Executes when no other thread is ready to run.
 
