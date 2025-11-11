@@ -15,46 +15,42 @@
 #include "userprog/process.h"
 #endif
 
-/* Random value for struct thread's `magic' member.
-	 Used to detect stack overflow.  See the big comment at the top
-	 of thread.h for details. */
+/// 스레드 구조체의 stack overflow 탐지용 magic값 (임의 난수, 변경 금지)
 #define THREAD_MAGIC 0xcd6abf4b
 
-/* Random value for basic thread
-	 Do not modify this value. */
+/// 기본 스레드에 사용되는 magic값 (임의 난수, 변경 금지)
 #define THREAD_BASIC 0xd42df210
 
-/* List of processes in THREAD_READY state, that is, processes
-	 that are ready to run but not actually running. */
+/// 실행 가능한 상태(ready)인 스레드들을 관리하는 리스트
 static struct list ready_list;
 
-/* List of processes in THREAD_BLOCKED state, that is, processes
-	 that are blocked and waiting for an event to trigger. */
+/* 뭔가를 기다리느라 잠들어 있거나, 실행이 중지된(process blocked) 스레드들 */
 
-/* Idle thread. */
+/// 시스템 전체에서 "대기만 하는" idle 스레드의 포인터
 static struct thread *idle_thread;
 
-/* Initial thread, the thread running init.c:main(). */
+/// 시스템 최초(main 함수 실행) 시 생성된 초기 스레드 포인터
 static struct thread *initial_thread;
 
-/* Lock used by allocate_tid(). */
+/// allocate_tid() 시 TID 중복 방지를 위한 락
 static struct lock tid_lock;
 
-/* Thread destruction requests */
+/// 종료 요청된 스레드(파괴 대기) 관리 리스트
 static struct list destruction_req;
 
-/* Statistics. */
-static long long idle_ticks;	 /* # of timer ticks spent idle. */
-static long long kernel_ticks; /* # of timer ticks in kernel threads. */
-static long long user_ticks;	 /* # of timer ticks in user programs. */
+static long long idle_ticks;	 // idle 상태 동안 누적된 타이머 틱 수
+static long long kernel_ticks; // 커널 스레드가 실행된 동안 누적된 타이머 틱 수
+static long long user_ticks;	 /// 유저 프로그램이 실행된 동안 누적된 타이머 틱 수
 
-/* Scheduling. */
-#define TIME_SLICE 4					/* # of timer ticks to give each thread. */
-static unsigned thread_ticks; /* # of timer ticks since last yield. */
+/* 스케쥴링 */
+#define TIME_SLICE 4					/// 각 스레드가 한 번 실행 시 부여되는 타이머 틱(스케줄 타임슬라이스)
+static unsigned thread_ticks; /// 마지막 yield 이후 경과된 타이머 틱 수
 
-/* If false (default), use round-robin scheduler.
-	 If true, use multi-level feedback queue scheduler.
-	 Controlled by kernel command-line option "-o mlfqs". */
+/*
+단순한 우선순위 없이 시간만으로 번갈아 실행하는 방식(라운드 로빈)"이 될지,
+"우선순위와 큐를 자동으로 관리하는 똑똑한 MLFQ 방식"이 될지 달라집니다.
+프로젝트 옵션이나 실험 목적에 따라 쉽게 스케줄러를 바꿀 수 있도록 만든 설정 플래그
+*/
 bool thread_mlfqs;
 
 static void kernel_thread(thread_func *, void *aux);

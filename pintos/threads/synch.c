@@ -25,21 +25,47 @@ void sema_init(struct semaphore *sema, unsigned value)
 	list_init(&sema->waiters);
 }
 
-/* Down or "P" operation on a semaphore.  Waits for SEMA's value
-	 to become positive and then atomically decrements it.
-
-	 This function may sleep, so it must not be called within an
-	 interrupt handler.  This function may be called with
-	 interrupts disabled, but if it sleeps then the next scheduled
-	 thread will probably turn interrupts back on. This is
-	 sema_down function. */
-/*
-- 세마포어 값이 0이면 대기 - waiters에 추가, thread_block으로 잠듦
-- 값이 1 이상이 되면 깨어나서 값을 1 줄임
-- 인터럽트 핸들러에서는 사용 금지
-- 인터럽트가 꺼진 상태에서도 호출 가능(단, 잠들면 다음 스레드가 인터럽트 켬)
-- 내가 자원 없어서 잠들면, 다음에 실행되는 스레드가 인터럽트 상태를 복구(켜줌)한다는 의미
-*/
+/**
+ * @brief 세마포어의 "down" (P) 연산을 수행하는 함수
+ *
+ * @param sema 대기 및 값을 감소시킬 세마포어의 포인터
+ *
+ * @details 세마포어의 값이 0이면 자원을 획득할 수 없으므로, 현재 스레드는
+ *          waiters 리스트에 추가되고 thread_block()을 호출해 블록(잠듦)됩니다.
+ *          값이 1 이상이 되면 깨어나서 값을 1 줄입니다.
+ *
+ * @note 동작 순서:
+ *       1. 인터럽트 비활성화 (원자성 보장)
+ *       2. 값이 0이면:
+ *          a. waiters 리스트에 현재 스레드 추가
+ *             - 기존: list_push_back()
+ *             - 개선: 우선순위 순 정렬 삽입 (list_insert_ordered)
+ *          b. thread_block()으로 스레드를 블록 (대기 상태 전환)
+ *          c. 다른 스레드가 sema_up()으로 신호를 보내야만 깨어날 수 있음
+ *       3. 값이 1 이상이면 바로 1 감소하고 자원 획득
+ *       4. 인터럽트 복원
+ *
+ * @note Priority Scheduling 구현:
+ *       - waiters 리스트를 우선순위 순서대로 삽입하여 우선순위가 높은 대기자가 먼저 깨게 함
+ *       - compare_ready_priority()로 비교
+ *
+ * @note 인터럽트와 sleep:
+ *       - 인터럽트가 꺼진 상태에서도 호출 가능 (원자성)
+ *       - 단, thread_block()으로 잠들면 다음 스케줄된 스레드가 인터럽트를 켜줌
+ *       - 따라서 잠들 때 현재 스레드가 인터럽트 상태를 복구하는 것이 아님
+ *       - 인터럽트 핸들러에서는 사용 금지 (블로킹 불가)
+ *
+ * @warning 다음 조건들이 만족되지 않으면 ASSERT 실패:
+ *          - sema != NULL
+ *          - 인터럽트 컨텍스트 아님 (!intr_context())
+ *
+ * @see sema_up()
+ * @see thread_block()
+ * @see list_insert_ordered()
+ * @see compare_ready_priority()
+ *
+ * @since Week08, 2025-11-10, Project 1 - priority-change TC (우선순위 삽입)
+ */
 void sema_down(struct semaphore *sema)
 {
 	enum intr_level old_level;
@@ -47,15 +73,22 @@ void sema_down(struct semaphore *sema)
 	ASSERT(sema != NULL);
 	ASSERT(!intr_context());
 
+	// 인터럽트 비활성화 (원자성 확보)
 	old_level = intr_disable();
+
+	// 세마포어 값이 0이면 waiters에 추가하고 블록
 	while (sema->value == 0)
 	{
-		/* 	추가한 부분. week08. 11.10. project1 - priority-change TC */
-		// list_push_back(&sema->waiters, &thread_current()->elem);
+		// 기존: list_push_back(&sema->waiters, &thread_current()->elem);
+		// 개선: 우선순위 정렬 삽입
 		list_insert_ordered(&sema->waiters, &thread_current()->elem, compare_ready_priority, NULL);
 		thread_block();
 	}
+
+	// 값이 1 이상이면 1 감소 (자원 획득)
 	sema->value--;
+
+	// 인터럽트 복원
 	intr_set_level(old_level);
 }
 
@@ -173,9 +206,6 @@ bool compare_sema_priority(const struct list_elem *a, const struct list_elem *b,
 
 static void sema_test_helper(void *sema_);
 
-/* Self-test for semaphores that makes control "ping-pong"
-	 between a pair of threads.  Insert calls to printf() to see
-	 what's going on. */
 void sema_self_test(void)
 {
 	struct semaphore sema[2];
@@ -193,7 +223,6 @@ void sema_self_test(void)
 	printf("done.\n");
 }
 
-/* Thread function used by sema_self_test(). */
 static void
 sema_test_helper(void *sema_)
 {
