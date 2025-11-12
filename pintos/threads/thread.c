@@ -526,12 +526,34 @@ void mlfqs_calculate_recent_cpu (struct thread *t, void *aux UNUSED) {
     t->recent_cpu = calculate_recent_cpu;
 }
 
+/* 스레드의 recent_cpu와 priority를 동시에 계산하는 최적화된 헬퍼 함수
+   (100틱마다 호출되어 타이머 인터럽트의 순회 횟수를 줄임) */
+void mlfqs_calculate_recent_cpu_and_priority (struct thread *t, void *aux UNUSED) { 
+    if (t == idle_thread) return;  // idle_thread는 제외
+    if (t->status == THREAD_DYING) return;  // dying 스레드는 제외
+    
+    // recent_cpu 계산
+    int calculate_recent_cpu = FP_MULT(
+        FP_DIV(FP_MULT_INT(load_avg, 2), FP_ADD_INT(FP_MULT_INT(load_avg, 2), 1)), 
+        t->recent_cpu
+    ) + INT_TO_FP(t->nice);
+    t->recent_cpu = calculate_recent_cpu;
+    
+    // priority 계산
+    int calculate_priority = FP_TO_INT_NEAR(FP_DIV_INT(t->recent_cpu, 4)) + (t->nice * 2);
+    t->priority = PRI_MAX - calculate_priority;
+    if (t->priority < PRI_MIN) t->priority = PRI_MIN;
+    if (t->priority > PRI_MAX) t->priority = PRI_MAX;
+}
+
 /* 시스템 load_avg를 계산하는 헬퍼 함수 
 	load_avg = (59/60) * load_avg + (1/60) * ready_threads
 */
 void mlfqs_calculate_load_avg (struct thread *cur_thread) {
-	// ready_list의 크기 + 현재 실행 중인 스레드(idle_thread 제외) = ready_threads
+	// ready_list의 크기 = 준비된 스레드 수 (O(1) 연산)
 	int ready_count = list_size(&ready_list);
+	
+	// 현재 실행 중인 스레드 추가 (idle_thread 제외)
 	int cur_count = (cur_thread != idle_thread ? 1 : 0);
 	int ready_threads = ready_count + cur_count;
 	
@@ -539,11 +561,8 @@ void mlfqs_calculate_load_avg (struct thread *cur_thread) {
     load_avg = FP_ADD(
        FP_DIV_INT(FP_MULT_INT(load_avg, 59), 60),
         FP_DIV_INT(INT_TO_FP(ready_threads), 60)
-); 
-	
+    );
 }
-
-
 
 
 

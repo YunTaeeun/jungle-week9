@@ -204,6 +204,7 @@ int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
 void mlfqs_calculate_priority (struct thread *, void *aux);
 void mlfqs_calculate_recent_cpu (struct thread *, void *aux);
+void mlfqs_calculate_recent_cpu_and_priority (struct thread *, void *aux);
 void mlfqs_calculate_load_avg (struct thread *cur_thread);
 void thread_foreach(thread_action_func *func, void *aux, struct thread *cur_thread);
 void sorted_ready_list(void);

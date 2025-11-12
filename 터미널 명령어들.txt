@@ -4,41 +4,7 @@ for t in alarm-{single,multiple,simultaneous,priority,zero,negative}; do make te
 
 for t in priority-{change,donate-one,donate-multiple,donate-multiple2,donate-nest,donate-sema,donate-lower,fifo,preempt,sema,condvar,donate-chain}; do make tests/threads/$t.result; done
 
-
-
-
-for t in priority-{change,fifo,preempt,sema,condvar}; do make tests/threads/$t.result; done
-
-
-for t in priority-{change,fifo,preempt}; do make tests/threads/$t.result; done
-for t in priority-{sema,condvar}; do make tests/threads/$t.result; done
-
-
-
-cd .. && make clean && make && cd build && for t in priority-{change,fifo,preempt,sema,condvar}; do make tests/threads/$t.result; done
-
-cd .. && clear && make clean && make && cd build && for t in mlfqs-{load-1,load-60,load-avg,recent-1,fair-2,fair-20,nice-2,nice-10,block}; do make tests/threads/mlfqs/$t.result; done
-
-
-
-# 모든 MLFQS 테스트 결과 확인
-grep -H "pass\|FAIL" tests/threads/mlfqs/*.result
-
-
-# 모든 MLFQS 테스트 실행
 for t in mlfqs-{load-1,load-60,load-avg,recent-1,fair-2,fair-20,nice-2,nice-10,block}; do make tests/threads/mlfqs/$t.result; done
-
-for t in mlfqs-{load-1,load-60,load-avg}; do make tests/threads/mlfqs/$t.result; done
-make tests/threads/mlfqs/mlfqs-recent-1.result
-for t in mlfqs-{fair-2,fair-20}; do make tests/threads/mlfqs/$t.result; done
-for t in mlfqs-{nice-2,nice-10}; do make tests/threads/mlfqs/$t.result; done
-make tests/threads/mlfqs/mlfqs-block.result
-
-
-
-
-
-priority-change, priority-preempt, priority-fifo, priority-sema, priority-condvar,
 
 
 
@@ -52,9 +18,6 @@ priority-change, priority-preempt, priority-fifo, priority-sema, priority-condva
 
 
 
-int priority;
-int original_priority;
-void donate_priority;
 
 
 
@@ -64,6 +27,115 @@ void donate_priority;
 
 
 
+ungle@345bbebd0f32:/workspaces/jungle-week9/pintos/threads/build$ for t in alarm-{single,multiple,simultaneous,priority,zero,negative}; do make tests/threads/$t.result; done
+pintos -v -k -T 60 -m 20   -- -q   run alarm-single < /dev/null 2> tests/threads/alarm-single.errors > tests/threads/alarm-single.output
+perl -I../.. ../../tests/threads/alarm-single.ck tests/threads/alarm-single tests/threads/alarm-single.result
+pass tests/threads/alarm-single
+pintos -v -k -T 60 -m 20   -- -q   run alarm-multiple < /dev/null 2> tests/threads/alarm-multiple.errors > tests/threads/alarm-multiple.output
+perl -I../.. ../../tests/threads/alarm-multiple.ck tests/threads/alarm-multiple tests/threads/alarm-multiple.result
+pass tests/threads/alarm-multiple
+pintos -v -k -T 60 -m 20   -- -q   run alarm-simultaneous < /dev/null 2> tests/threads/alarm-simultaneous.errors > tests/threads/alarm-simultaneous.output
+perl -I../.. ../../tests/threads/alarm-simultaneous.ck tests/threads/alarm-simultaneous tests/threads/alarm-simultaneous.result
+pass tests/threads/alarm-simultaneous
+pintos -v -k -T 60 -m 20   -- -q   run alarm-priority < /dev/null 2> tests/threads/alarm-priority.errors > tests/threads/alarm-priority.output
+perl -I../.. ../../tests/threads/alarm-priority.ck tests/threads/alarm-priority tests/threads/alarm-priority.result
+pass tests/threads/alarm-priority
+pintos -v -k -T 60 -m 20   -- -q   run alarm-zero < /dev/null 2> tests/threads/alarm-zero.errors > tests/threads/alarm-zero.output
+perl -I../.. ../../tests/threads/alarm-zero.ck tests/threads/alarm-zero tests/threads/alarm-zero.result
+pass tests/threads/alarm-zero
+pintos -v -k -T 60 -m 20   -- -q   run alarm-negative < /dev/null 2> tests/threads/alarm-negative.errors > tests/threads/alarm-negative.output
+perl -I../.. ../../tests/threads/alarm-negative.ck tests/threads/alarm-negative tests/threads/alarm-negative.result
+pass tests/threads/alarm-negative
+jungle@345bbebd0f32:/workspaces/jungle-week9/pintos/threads/build$ for t in priority-{change,donate-one,donate-multiple,donate-multiple2,donate-nest,donate-sema,donate-lower,fifo,preempt,sema,condvar,donate-chain}; do make tests/threads/$t.result; done
+pintos -v -k -T 60 -m 20   -- -q   run priority-change < /dev/null 2> tests/threads/priority-change.errors > tests/threads/priority-change.output
+perl -I../.. ../../tests/threads/priority-change.ck tests/threads/priority-change tests/threads/priority-change.result
+pass tests/threads/priority-change
+pintos -v -k -T 60 -m 20   -- -q   run priority-donate-one < /dev/null 2> tests/threads/priority-donate-one.errors > tests/threads/priority-donate-one.output
+perl -I../.. ../../tests/threads/priority-donate-one.ck tests/threads/priority-donate-one tests/threads/priority-donate-one.result
+pass tests/threads/priority-donate-one
+pintos -v -k -T 60 -m 20   -- -q   run priority-donate-multiple < /dev/null 2> tests/threads/priority-donate-multiple.errors > tests/threads/priority-donate-multiple.output
+perl -I../.. ../../tests/threads/priority-donate-multiple.ck tests/threads/priority-donate-multiple tests/threads/priority-donate-multiple.result
+pass tests/threads/priority-donate-multiple
+pintos -v -k -T 60 -m 20   -- -q   run priority-donate-multiple2 < /dev/null 2> tests/threads/priority-donate-multiple2.errors > tests/threads/priority-donate-multiple2.output
+perl -I../.. ../../tests/threads/priority-donate-multiple2.ck tests/threads/priority-donate-multiple2 tests/threads/priority-donate-multiple2.result
+pass tests/threads/priority-donate-multiple2
+pintos -v -k -T 60 -m 20   -- -q   run priority-donate-nest < /dev/null 2> tests/threads/priority-donate-nest.errors > tests/threads/priority-donate-nest.output
+perl -I../.. ../../tests/threads/priority-donate-nest.ck tests/threads/priority-donate-nest tests/threads/priority-donate-nest.result
+pass tests/threads/priority-donate-nest
+pintos -v -k -T 60 -m 20   -- -q   run priority-donate-sema < /dev/null 2> tests/threads/priority-donate-sema.errors > tests/threads/priority-donate-sema.output
+perl -I../.. ../../tests/threads/priority-donate-sema.ck tests/threads/priority-donate-sema tests/threads/priority-donate-sema.result
+pass tests/threads/priority-donate-sema
+pintos -v -k -T 60 -m 20   -- -q   run priority-donate-lower < /dev/null 2> tests/threads/priority-donate-lower.errors > tests/threads/priority-donate-lower.output
+perl -I../.. ../../tests/threads/priority-donate-lower.ck tests/threads/priority-donate-lower tests/threads/priority-donate-lower.result
+pass tests/threads/priority-donate-lower
+pintos -v -k -T 60 -m 20   -- -q   run priority-fifo < /dev/null 2> tests/threads/priority-fifo.errors > tests/threads/priority-fifo.output
+perl -I../.. ../../tests/threads/priority-fifo.ck tests/threads/priority-fifo tests/threads/priority-fifo.result
+pass tests/threads/priority-fifo
+pintos -v -k -T 60 -m 20   -- -q   run priority-preempt < /dev/null 2> tests/threads/priority-preempt.errors > tests/threads/priority-preempt.output
+perl -I../.. ../../tests/threads/priority-preempt.ck tests/threads/priority-preempt tests/threads/priority-preempt.result
+pass tests/threads/priority-preempt
+pintos -v -k -T 60 -m 20   -- -q   run priority-sema < /dev/null 2> tests/threads/priority-sema.errors > tests/threads/priority-sema.output
+perl -I../.. ../../tests/threads/priority-sema.ck tests/threads/priority-sema tests/threads/priority-sema.result
+pass tests/threads/priority-sema
+pintos -v -k -T 60 -m 20   -- -q   run priority-condvar < /dev/null 2> tests/threads/priority-condvar.errors > tests/threads/priority-condvar.output
+perl -I../.. ../../tests/threads/priority-condvar.ck tests/threads/priority-condvar tests/threads/priority-condvar.result
+pass tests/threads/priority-condvar
+pintos -v -k -T 60 -m 20   -- -q   run priority-donate-chain < /dev/null 2> tests/threads/priority-donate-chain.errors > tests/threads/priority-donate-chain.output
+perl -I../.. ../../tests/threads/priority-donate-chain.ck tests/threads/priority-donate-chain tests/threads/priority-donate-chain.result
+pass tests/threads/priority-donate-chain
+pintos -v -k -T 480 -m 20   -- -q  -mlfqs run mlfqs-load-1 < /dev/null 2> tests/threads/mlfqs/mlfqs-load-1.errors > tests/threads/mlfqs/mlfqs-load-1.output
+perl -I../.. ../../tests/threads/mlfqs/mlfqs-load-1.ck tests/threads/mlfqs/mlfqs-load-1 tests/threads/mlfqs/mlfqs-load-1.result
+pass tests/threads/mlfqs/mlfqs-load-1
+pintos -v -k -T 480 -m 20   -- -q  -mlfqs run mlfqs-load-60 < /dev/null 2> tests/threads/mlfqs/mlfqs-load-60.errors > tests/threads/mlfqs/mlfqs-load-60.output
+perl -I../.. ../../tests/threads/mlfqs/mlfqs-load-60.ck tests/threads/mlfqs/mlfqs-load-60 tests/threads/mlfqs/mlfqs-load-60.result
+pass tests/threads/mlfqs/mlfqs-load-60
+pintos -v -k -T 480 -m 20   -- -q  -mlfqs run mlfqs-load-avg < /dev/null 2> tests/threads/mlfqs/mlfqs-load-avg.errors > tests/threads/mlfqs/mlfqs-load-avg.output
+perl -I../.. ../../tests/threads/mlfqs/mlfqs-load-avg.ck tests/threads/mlfqs/mlfqs-load-avg tests/threads/mlfqs/mlfqs-load-avg.result
+pass tests/threads/mlfqs/mlfqs-load-avg
+pintos -v -k -T 480 -m 20   -- -q  -mlfqs run mlfqs-recent-1 < /dev/null 2> tests/threads/mlfqs/mlfqs-recent-1.errors > tests/threads/mlfqs/mlfqs-recent-1.output
+perl -I../.. ../../tests/threads/mlfqs/mlfqs-recent-1.ck tests/threads/mlfqs/mlfqs-recent-1 tests/threads/mlfqs/mlfqs-recent-1.result
+pass tests/threads/mlfqs/mlfqs-recent-1
+pintos -v -k -T 480 -m 20   -- -q  -mlfqs run mlfqs-fair-2 < /dev/null 2> tests/threads/mlfqs/mlfqs-fair-2.errors > tests/threads/mlfqs/mlfqs-fair-2.output
+perl -I../.. ../../tests/threads/mlfqs/mlfqs-fair-2.ck tests/threads/mlfqs/mlfqs-fair-2 tests/threads/mlfqs/mlfqs-fair-2.result
+pass tests/threads/mlfqs/mlfqs-fair-2
+pintos -v -k -T 480 -m 20   -- -q  -mlfqs run mlfqs-fair-20 < /dev/null 2> tests/threads/mlfqs/mlfqs-fair-20.errors > tests/threads/mlfqs/mlfqs-fair-20.output
+perl -I../.. ../../tests/threads/mlfqs/mlfqs-fair-20.ck tests/threads/mlfqs/mlfqs-fair-20 tests/threads/mlfqs/mlfqs-fair-20.result
+pass tests/threads/mlfqs/mlfqs-fair-20
+pintos -v -k -T 480 -m 20   -- -q  -mlfqs run mlfqs-nice-2 < /dev/null 2> tests/threads/mlfqs/mlfqs-nice-2.errors > tests/threads/mlfqs/mlfqs-nice-2.output
+perl -I../.. ../../tests/threads/mlfqs/mlfqs-nice-2.ck tests/threads/mlfqs/mlfqs-nice-2 tests/threads/mlfqs/mlfqs-nice-2.result
+pass tests/threads/mlfqs/mlfqs-nice-2
+pintos -v -k -T 480 -m 20   -- -q  -mlfqs run mlfqs-nice-10 < /dev/null 2> tests/threads/mlfqs/mlfqs-nice-10.errors > tests/threads/mlfqs/mlfqs-nice-10.output
+perl -I../.. ../../tests/threads/mlfqs/mlfqs-nice-10.ck tests/threads/mlfqs/mlfqs-nice-10 tests/threads/mlfqs/mlfqs-nice-10.result
+pass tests/threads/mlfqs/mlfqs-nice-10
+pintos -v -k -T 480 -m 20   -- -q  -mlfqs run mlfqs-block < /dev/null 2> tests/threads/mlfqs/mlfqs-block.errors > tests/threads/mlfqs/mlfqs-block.output
+perl -I../.. ../../tests/threads/mlfqs/mlfqs-block.ck tests/threads/mlfqs/mlfqs-block tests/threads/mlfqs/mlfqs-block.result
+FAIL tests/threads/mlfqs/mlfqs-block
+Test output failed to match any acceptable form.
+
+Acceptable output:
+  (mlfqs-block) begin
+  (mlfqs-block) Main thread acquiring lock.
+  (mlfqs-block) Main thread creating block thread, sleeping 25 seconds...
+  (mlfqs-block) Block thread spinning for 20 seconds...
+  (mlfqs-block) Block thread acquiring lock...
+  (mlfqs-block) Main thread spinning for 5 seconds...
+  (mlfqs-block) Main thread releasing lock.
+  (mlfqs-block) ...got it.
+  (mlfqs-block) Block thread should have already acquired lock.
+  (mlfqs-block) end
+Differences in `diff -u' format:
+  (mlfqs-block) begin
+  (mlfqs-block) Main thread acquiring lock.
+  (mlfqs-block) Main thread creating block thread, sleeping 25 seconds...
+  (mlfqs-block) Block thread spinning for 20 seconds...
+  (mlfqs-block) Block thread acquiring lock...
+  (mlfqs-block) Main thread spinning for 5 seconds...
+  (mlfqs-block) Main thread releasing lock.
+- (mlfqs-block) ...got it.
+- (mlfqs-block) Block thread should have already acquired lock.
++ (mlfqs-block) ...got it.(mlfqs-block) 
++ Block thread should have already acquired lock.
+  (mlfqs-block) end
 
 
 

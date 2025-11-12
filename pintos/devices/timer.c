@@ -337,19 +337,21 @@ static void timer_interrupt (struct intr_frame *args UNUSED) {
       if(cheak_idle_thread(cur_thread))
          cur_thread->recent_cpu = FP_ADD_INT(cur_thread->recent_cpu, 1);
 
-      // 100틱마다: load_avg와 모든 스레드 priority,recent_cpu 재계산
+      // 100틱마다: load_avg와 모든 스레드 recent_cpu, priority 재계산
+      // 한 번의 순회로 처리하여 타이머 인터럽트 시간 최소화
       if (ticks % TIMER_FREQ == 0) {
          mlfqs_calculate_load_avg(cur_thread);
-         thread_foreach(mlfqs_calculate_recent_cpu, NULL, cur_thread);
-         thread_foreach(mlfqs_calculate_priority, NULL, cur_thread);
+         thread_foreach(mlfqs_calculate_recent_cpu_and_priority, NULL, cur_thread);
+         sorted_ready_list();  // priority 변경 후 ready_list 재정렬
       }
-      // 4틱마다 : 모든 스레드 priority 재계산
+      // 4틱마다: 모든 스레드 priority 재계산 (100틱이 아닐 때만)
       else if (ticks % 4 == 0) {
          thread_foreach(mlfqs_calculate_priority, NULL, cur_thread);
+         sorted_ready_list();  // priority 변경 후 ready_list 재정렬
       }
    }
 
-   // sleep_list 처리 (MLFQS 모드와 관계없이 항상 처리)
+   // sleep_list 처리
    if (!list_empty(&sleep_list)) {
       while (!list_empty(&sleep_list)) {
          struct list_elem *e = list_front(&sleep_list);
