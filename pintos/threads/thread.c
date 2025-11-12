@@ -427,6 +427,7 @@ thread_set_priority (int new_priority) {
 	}
 }
 
+
 /* Returns the current thread's priority. */
 // 현재 쓰레드의 최종 우선순위 반환 함수
 int
