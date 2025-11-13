@@ -16,7 +16,867 @@ for t in mlfqs-{load-1,load-60,load-avg,recent-1,fair-2,fair-20,nice-2,nice-10,b
 
 
 
-
+├── LICENSE
+├── Make.config
+├── Makefile
+├── Makefile.build
+├── Makefile.kernel
+├── Makefile.userprog
+├── README.md
+├── activate
+├── devices
+│   ├── disk.c
+│   ├── input.c
+│   ├── intq.c
+│   ├── kbd.c
+│   ├── serial.c
+│   ├── targets.mk
+│   ├── timer.c
+│   └── vga.c
+├── filesys
+│   ├── Make.vars
+│   ├── Makefile
+│   ├── directory.c
+│   ├── fat.c
+│   ├── file.c
+│   ├── filesys.c
+│   ├── free-map.c
+│   ├── fsutil.c
+│   ├── inode.c
+│   ├── page_cache.c
+│   └── targets.mk
+├── include
+│   ├── devices
+│   │   ├── disk.h
+│   │   ├── input.h
+│   │   ├── intq.h
+│   │   ├── kbd.h
+│   │   ├── serial.h
+│   │   ├── timer.h
+│   │   └── vga.h
+│   ├── filesys
+│   │   ├── directory.h
+│   │   ├── fat.h
+│   │   ├── file.h
+│   │   ├── filesys.h
+│   │   ├── free-map.h
+│   │   ├── fsutil.h
+│   │   ├── inode.h
+│   │   ├── off_t.h
+│   │   └── page_cache.h
+│   ├── intrinsic.h
+│   ├── lib
+│   │   ├── ctype.h
+│   │   ├── debug.h
+│   │   ├── inttypes.h
+│   │   ├── kernel
+│   │   │   ├── bitmap.h
+│   │   │   ├── console.h
+│   │   │   ├── hash.h
+│   │   │   ├── list.h
+│   │   │   └── stdio.h
+│   │   ├── limits.h
+│   │   ├── random.h
+│   │   ├── round.h
+│   │   ├── stdarg.h
+│   │   ├── stdbool.h
+│   │   ├── stddef.h
+│   │   ├── stdint.h
+│   │   ├── stdio.h
+│   │   ├── stdlib.h
+│   │   ├── string.h
+│   │   ├── syscall-nr.h
+│   │   └── user
+│   │       ├── stdio.h
+│   │       └── syscall.h
+│   ├── threads
+│   │   ├── flags.h
+│   │   ├── init.h
+│   │   ├── interrupt.h
+│   │   ├── intr-stubs.h
+│   │   ├── io.h
+│   │   ├── loader.h
+│   │   ├── malloc.h
+│   │   ├── mmu.h
+│   │   ├── palloc.h
+│   │   ├── pte.h
+│   │   ├── synch.h
+│   │   ├── thread.h
+│   │   └── vaddr.h
+│   ├── userprog
+│   │   ├── exception.h
+│   │   ├── gdt.h
+│   │   ├── process.h
+│   │   ├── syscall.h
+│   │   └── tss.h
+│   └── vm
+│       ├── anon.h
+│       ├── file.h
+│       ├── inspect.h
+│       ├── uninit.h
+│       └── vm.h
+├── install.sh
+├── lib
+│   ├── arithmetic.c
+│   ├── debug.c
+│   ├── kernel
+│   │   ├── bitmap.c
+│   │   ├── console.c
+│   │   ├── debug.c
+│   │   ├── hash.c
+│   │   ├── list.c
+│   │   └── targets.mk
+│   ├── random.c
+│   ├── stdio.c
+│   ├── stdlib.c
+│   ├── string.c
+│   ├── targets.mk
+│   └── user
+│       ├── console.c
+│       ├── debug.c
+│       ├── entry.c
+│       ├── syscall.c
+│       └── user.lds
+├── tests
+│   ├── Algorithm
+│   │   └── Diff.pm
+│   ├── Make.tests
+│   ├── arc4.c
+│   ├── arc4.h
+│   ├── arc4.pm
+│   ├── cksum.c
+│   ├── cksum.h
+│   ├── cksum.pm
+│   ├── filesys
+│   │   ├── Grading.no-vm
+│   │   ├── Grading.with-vm
+│   │   ├── base
+│   │   │   ├── Make.tests
+│   │   │   ├── Rubric
+│   │   │   ├── child-syn-read.c
+│   │   │   ├── child-syn-wrt.c
+│   │   │   ├── full.inc
+│   │   │   ├── lg-create.c
+│   │   │   ├── lg-create.ck
+│   │   │   ├── lg-full.c
+│   │   │   ├── lg-full.ck
+│   │   │   ├── lg-random.c
+│   │   │   ├── lg-random.ck
+│   │   │   ├── lg-seq-block.c
+│   │   │   ├── lg-seq-block.ck
+│   │   │   ├── lg-seq-random.c
+│   │   │   ├── lg-seq-random.ck
+│   │   │   ├── random.inc
+│   │   │   ├── seq-block.inc
+│   │   │   ├── seq-random.inc
+│   │   │   ├── sm-create.c
+│   │   │   ├── sm-create.ck
+│   │   │   ├── sm-full.c
+│   │   │   ├── sm-full.ck
+│   │   │   ├── sm-random.c
+│   │   │   ├── sm-random.ck
+│   │   │   ├── sm-seq-block.c
+│   │   │   ├── sm-seq-block.ck
+│   │   │   ├── sm-seq-random.c
+│   │   │   ├── sm-seq-random.ck
+│   │   │   ├── syn-read.c
+│   │   │   ├── syn-read.ck
+│   │   │   ├── syn-read.h
+│   │   │   ├── syn-remove.c
+│   │   │   ├── syn-remove.ck
+│   │   │   ├── syn-write.c
+│   │   │   ├── syn-write.ck
+│   │   │   └── syn-write.h
+│   │   ├── buffer-cache
+│   │   │   ├── Make.tests
+│   │   │   ├── Rubric
+│   │   │   ├── bc-easy.c
+│   │   │   └── bc-easy.ck
+│   │   ├── create.inc
+│   │   ├── extended
+│   │   │   ├── Make.tests
+│   │   │   ├── Rubric.functionality
+│   │   │   ├── Rubric.persistence
+│   │   │   ├── Rubric.robustness
+│   │   │   ├── child-syn-rw.c
+│   │   │   ├── dir-empty-name-persistence.ck
+│   │   │   ├── dir-empty-name.c
+│   │   │   ├── dir-empty-name.ck
+│   │   │   ├── dir-mk-tree-persistence.ck
+│   │   │   ├── dir-mk-tree.c
+│   │   │   ├── dir-mk-tree.ck
+│   │   │   ├── dir-mkdir-persistence.ck
+│   │   │   ├── dir-mkdir.c
+│   │   │   ├── dir-mkdir.ck
+│   │   │   ├── dir-open-persistence.ck
+│   │   │   ├── dir-open.c
+│   │   │   ├── dir-open.ck
+│   │   │   ├── dir-over-file-persistence.ck
+│   │   │   ├── dir-over-file.c
+│   │   │   ├── dir-over-file.ck
+│   │   │   ├── dir-rm-cwd-persistence.ck
+│   │   │   ├── dir-rm-cwd.c
+│   │   │   ├── dir-rm-cwd.ck
+│   │   │   ├── dir-rm-parent-persistence.ck
+│   │   │   ├── dir-rm-parent.c
+│   │   │   ├── dir-rm-parent.ck
+│   │   │   ├── dir-rm-root-persistence.ck
+│   │   │   ├── dir-rm-root.c
+│   │   │   ├── dir-rm-root.ck
+│   │   │   ├── dir-rm-tree-persistence.ck
+│   │   │   ├── dir-rm-tree.c
+│   │   │   ├── dir-rm-tree.ck
+│   │   │   ├── dir-rmdir-persistence.ck
+│   │   │   ├── dir-rmdir.c
+│   │   │   ├── dir-rmdir.ck
+│   │   │   ├── dir-under-file-persistence.ck
+│   │   │   ├── dir-under-file.c
+│   │   │   ├── dir-under-file.ck
+│   │   │   ├── dir-vine-persistence.ck
+│   │   │   ├── dir-vine.c
+│   │   │   ├── dir-vine.ck
+│   │   │   ├── grow-create-persistence.ck
+│   │   │   ├── grow-create.c
+│   │   │   ├── grow-create.ck
+│   │   │   ├── grow-dir-lg-persistence.ck
+│   │   │   ├── grow-dir-lg.c
+│   │   │   ├── grow-dir-lg.ck
+│   │   │   ├── grow-dir.inc
+│   │   │   ├── grow-file-size-persistence.ck
+│   │   │   ├── grow-file-size.c
+│   │   │   ├── grow-file-size.ck
+│   │   │   ├── grow-root-lg-persistence.ck
+│   │   │   ├── grow-root-lg.c
+│   │   │   ├── grow-root-lg.ck
+│   │   │   ├── grow-root-sm-persistence.ck
+│   │   │   ├── grow-root-sm.c
+│   │   │   ├── grow-root-sm.ck
+│   │   │   ├── grow-seq-lg-persistence.ck
+│   │   │   ├── grow-seq-lg.c
+│   │   │   ├── grow-seq-lg.ck
+│   │   │   ├── grow-seq-sm-persistence.ck
+│   │   │   ├── grow-seq-sm.c
+│   │   │   ├── grow-seq-sm.ck
+│   │   │   ├── grow-seq.inc
+│   │   │   ├── grow-sparse-persistence.ck
+│   │   │   ├── grow-sparse.c
+│   │   │   ├── grow-sparse.ck
+│   │   │   ├── grow-tell-persistence.ck
+│   │   │   ├── grow-tell.c
+│   │   │   ├── grow-tell.ck
+│   │   │   ├── grow-two-files-persistence.ck
+│   │   │   ├── grow-two-files.c
+│   │   │   ├── grow-two-files.ck
+│   │   │   ├── mk-tree.c
+│   │   │   ├── mk-tree.h
+│   │   │   ├── symlink-dir-persistence.ck
+│   │   │   ├── symlink-dir.c
+│   │   │   ├── symlink-dir.ck
+│   │   │   ├── symlink-file-persistence.ck
+│   │   │   ├── symlink-file.c
+│   │   │   ├── symlink-file.ck
+│   │   │   ├── symlink-link-persistence.ck
+│   │   │   ├── symlink-link.c
+│   │   │   ├── symlink-link.ck
+│   │   │   ├── syn-rw-persistence.ck
+│   │   │   ├── syn-rw.c
+│   │   │   ├── syn-rw.ck
+│   │   │   ├── syn-rw.h
+│   │   │   └── tar.c
+│   │   ├── mount
+│   │   │   ├── Make.tests
+│   │   │   ├── Rubric
+│   │   │   ├── mount-easy.c
+│   │   │   └── mount-easy.ck
+│   │   ├── seq-test.c
+│   │   └── seq-test.h
+│   ├── internal
+│   │   ├── list.c
+│   │   ├── stdio.c
+│   │   └── stdlib.c
+│   ├── lib.c
+│   ├── lib.h
+│   ├── lib.pm
+│   ├── main.c
+│   ├── main.h
+│   ├── make-grade
+│   ├── random.pm
+│   ├── tests.pm
+│   ├── threads
+│   │   ├── Grading
+│   │   ├── Make.tests
+│   │   ├── Rubric.alarm
+│   │   ├── Rubric.priority
+│   │   ├── alarm-multiple.ck
+│   │   ├── alarm-negative.c
+│   │   ├── alarm-negative.ck
+│   │   ├── alarm-priority.c
+│   │   ├── alarm-priority.ck
+│   │   ├── alarm-simultaneous.c
+│   │   ├── alarm-simultaneous.ck
+│   │   ├── alarm-single.ck
+│   │   ├── alarm-wait.c
+│   │   ├── alarm-zero.c
+│   │   ├── alarm-zero.ck
+│   │   ├── alarm.pm
+│   │   ├── mlfqs
+│   │   │   ├── Make.tests
+│   │   │   ├── Rubric
+│   │   │   ├── mlfqs-block.c
+│   │   │   ├── mlfqs-block.ck
+│   │   │   ├── mlfqs-fair-2.ck
+│   │   │   ├── mlfqs-fair-20.ck
+│   │   │   ├── mlfqs-fair.c
+│   │   │   ├── mlfqs-load-1.c
+│   │   │   ├── mlfqs-load-1.ck
+│   │   │   ├── mlfqs-load-60.c
+│   │   │   ├── mlfqs-load-60.ck
+│   │   │   ├── mlfqs-load-avg.c
+│   │   │   ├── mlfqs-load-avg.ck
+│   │   │   ├── mlfqs-nice-10.ck
+│   │   │   ├── mlfqs-nice-2.ck
+│   │   │   ├── mlfqs-recent-1.c
+│   │   │   └── mlfqs-recent-1.ck
+│   │   ├── mlfqs.pm
+│   │   ├── priority-change.c
+│   │   ├── priority-change.ck
+│   │   ├── priority-condvar.c
+│   │   ├── priority-condvar.ck
+│   │   ├── priority-donate-chain.c
+│   │   ├── priority-donate-chain.ck
+│   │   ├── priority-donate-lower.c
+│   │   ├── priority-donate-lower.ck
+│   │   ├── priority-donate-multiple.c
+│   │   ├── priority-donate-multiple.ck
+│   │   ├── priority-donate-multiple2.c
+│   │   ├── priority-donate-multiple2.ck
+│   │   ├── priority-donate-nest.c
+│   │   ├── priority-donate-nest.ck
+│   │   ├── priority-donate-one.c
+│   │   ├── priority-donate-one.ck
+│   │   ├── priority-donate-sema.c
+│   │   ├── priority-donate-sema.ck
+│   │   ├── priority-fifo.c
+│   │   ├── priority-fifo.ck
+│   │   ├── priority-preempt.c
+│   │   ├── priority-preempt.ck
+│   │   ├── priority-sema.c
+│   │   ├── priority-sema.ck
+│   │   ├── tests.c
+│   │   └── tests.h
+│   ├── userprog
+│   │   ├── Grading.extra
+│   │   ├── Grading.no-extra
+│   │   ├── Make.tests
+│   │   ├── Rubric.functionality
+│   │   ├── Rubric.robustness
+│   │   ├── args-dbl-space.ck
+│   │   ├── args-many.ck
+│   │   ├── args-multiple.ck
+│   │   ├── args-none.ck
+│   │   ├── args-single.ck
+│   │   ├── args.c
+│   │   ├── bad-jump.c
+│   │   ├── bad-jump.ck
+│   │   ├── bad-jump2.c
+│   │   ├── bad-jump2.ck
+│   │   ├── bad-read.c
+│   │   ├── bad-read.ck
+│   │   ├── bad-read2.c
+│   │   ├── bad-read2.ck
+│   │   ├── bad-write.c
+│   │   ├── bad-write.ck
+│   │   ├── bad-write2.c
+│   │   ├── bad-write2.ck
+│   │   ├── boundary.c
+│   │   ├── boundary.h
+│   │   ├── child-bad.c
+│   │   ├── child-close.c
+│   │   ├── child-read.c
+│   │   ├── child-rox.c
+│   │   ├── child-simple.c
+│   │   ├── close-bad-fd.c
+│   │   ├── close-bad-fd.ck
+│   │   ├── close-normal.c
+│   │   ├── close-normal.ck
+│   │   ├── close-twice.c
+│   │   ├── close-twice.ck
+│   │   ├── create-bad-ptr.c
+│   │   ├── create-bad-ptr.ck
+│   │   ├── create-bound.c
+│   │   ├── create-bound.ck
+│   │   ├── create-empty.c
+│   │   ├── create-empty.ck
+│   │   ├── create-exists.c
+│   │   ├── create-exists.ck
+│   │   ├── create-long.c
+│   │   ├── create-long.ck
+│   │   ├── create-normal.c
+│   │   ├── create-normal.ck
+│   │   ├── create-null.c
+│   │   ├── create-null.ck
+│   │   ├── dup2
+│   │   │   ├── Make.tests
+│   │   │   ├── Rubric
+│   │   │   ├── dup2-complex.c
+│   │   │   ├── dup2-complex.ck
+│   │   │   ├── dup2-simple.c
+│   │   │   ├── dup2-simple.ck
+│   │   │   └── sample.txt
+│   │   ├── exec-arg.c
+│   │   ├── exec-arg.ck
+│   │   ├── exec-bad-ptr.c
+│   │   ├── exec-bad-ptr.ck
+│   │   ├── exec-boundary.c
+│   │   ├── exec-boundary.ck
+│   │   ├── exec-missing.c
+│   │   ├── exec-missing.ck
+│   │   ├── exec-once.c
+│   │   ├── exec-once.ck
+│   │   ├── exec-read.c
+│   │   ├── exec-read.ck
+│   │   ├── exit.c
+│   │   ├── exit.ck
+│   │   ├── fork-boundary.c
+│   │   ├── fork-boundary.ck
+│   │   ├── fork-close.c
+│   │   ├── fork-close.ck
+│   │   ├── fork-multiple.c
+│   │   ├── fork-multiple.ck
+│   │   ├── fork-once.c
+│   │   ├── fork-once.ck
+│   │   ├── fork-read.c
+│   │   ├── fork-read.ck
+│   │   ├── fork-recursive.c
+│   │   ├── fork-recursive.ck
+│   │   ├── halt.c
+│   │   ├── halt.ck
+│   │   ├── lib
+│   │   │   └── user
+│   │   ├── multi-child-fd.c
+│   │   ├── multi-child-fd.ck
+│   │   ├── multi-recurse.c
+│   │   ├── multi-recurse.ck
+│   │   ├── no-vm
+│   │   │   ├── Make.tests
+│   │   │   ├── Rubric
+│   │   │   ├── multi-oom.c
+│   │   │   └── multi-oom.ck
+│   │   ├── null.ck
+│   │   ├── open-bad-ptr.c
+│   │   ├── open-bad-ptr.ck
+│   │   ├── open-boundary.c
+│   │   ├── open-boundary.ck
+│   │   ├── open-empty.c
+│   │   ├── open-empty.ck
+│   │   ├── open-missing.c
+│   │   ├── open-missing.ck
+│   │   ├── open-normal.c
+│   │   ├── open-normal.ck
+│   │   ├── open-null.c
+│   │   ├── open-null.ck
+│   │   ├── open-twice.c
+│   │   ├── open-twice.ck
+│   │   ├── read-bad-fd.c
+│   │   ├── read-bad-fd.ck
+│   │   ├── read-bad-ptr.c
+│   │   ├── read-bad-ptr.ck
+│   │   ├── read-boundary.c
+│   │   ├── read-boundary.ck
+│   │   ├── read-normal.c
+│   │   ├── read-normal.ck
+│   │   ├── read-stdout.c
+│   │   ├── read-stdout.ck
+│   │   ├── read-zero.c
+│   │   ├── read-zero.ck
+│   │   ├── rox-child.c
+│   │   ├── rox-child.ck
+│   │   ├── rox-child.inc
+│   │   ├── rox-multichild.c
+│   │   ├── rox-multichild.ck
+│   │   ├── rox-simple.c
+│   │   ├── rox-simple.ck
+│   │   ├── sample.inc
+│   │   ├── sample.txt
+│   │   ├── wait-bad-pid.c
+│   │   ├── wait-bad-pid.ck
+│   │   ├── wait-killed.c
+│   │   ├── wait-killed.ck
+│   │   ├── wait-simple.c
+│   │   ├── wait-simple.ck
+│   │   ├── wait-twice.c
+│   │   ├── wait-twice.ck
+│   │   ├── write-bad-fd.c
+│   │   ├── write-bad-fd.ck
+│   │   ├── write-bad-ptr.c
+│   │   ├── write-bad-ptr.ck
+│   │   ├── write-boundary.c
+│   │   ├── write-boundary.ck
+│   │   ├── write-normal.c
+│   │   ├── write-normal.ck
+│   │   ├── write-stdin.c
+│   │   ├── write-stdin.ck
+│   │   ├── write-zero.c
+│   │   └── write-zero.ck
+│   └── vm
+│       ├── Grading
+│       ├── Make.tests
+│       ├── Rubric.functionality
+│       ├── Rubric.robustness
+│       ├── child-inherit.c
+│       ├── child-linear.c
+│       ├── child-mm-wrt.c
+│       ├── child-qsort-mm.c
+│       ├── child-qsort.c
+│       ├── child-sort.c
+│       ├── child-swap.c
+│       ├── cow
+│       │   ├── Make.tests
+│       │   ├── Rubric
+│       │   ├── cow-simple.c
+│       │   └── cow-simple.ck
+│       ├── large.inc
+│       ├── large.txt
+│       ├── lazy-anon.c
+│       ├── lazy-anon.ck
+│       ├── lazy-file.c
+│       ├── lazy-file.ck
+│       ├── mmap-bad-fd.c
+│       ├── mmap-bad-fd.ck
+│       ├── mmap-bad-fd2.c
+│       ├── mmap-bad-fd2.ck
+│       ├── mmap-bad-fd3.c
+│       ├── mmap-bad-fd3.ck
+│       ├── mmap-bad-off.c
+│       ├── mmap-bad-off.ck
+│       ├── mmap-clean.c
+│       ├── mmap-clean.ck
+│       ├── mmap-close.c
+│       ├── mmap-close.ck
+│       ├── mmap-exit.c
+│       ├── mmap-exit.ck
+│       ├── mmap-inherit.c
+│       ├── mmap-inherit.ck
+│       ├── mmap-kernel.c
+│       ├── mmap-kernel.ck
+│       ├── mmap-misalign.c
+│       ├── mmap-misalign.ck
+│       ├── mmap-null.c
+│       ├── mmap-null.ck
+│       ├── mmap-off.c
+│       ├── mmap-off.ck
+│       ├── mmap-over-code.c
+│       ├── mmap-over-code.ck
+│       ├── mmap-over-data.c
+│       ├── mmap-over-data.ck
+│       ├── mmap-over-stk.c
+│       ├── mmap-over-stk.ck
+│       ├── mmap-overlap.c
+│       ├── mmap-overlap.ck
+│       ├── mmap-read.c
+│       ├── mmap-read.ck
+│       ├── mmap-remove.c
+│       ├── mmap-remove.ck
+│       ├── mmap-ro.c
+│       ├── mmap-ro.ck
+│       ├── mmap-shuffle.c
+│       ├── mmap-shuffle.ck
+│       ├── mmap-twice.c
+│       ├── mmap-twice.ck
+│       ├── mmap-unmap.c
+│       ├── mmap-unmap.ck
+│       ├── mmap-write.c
+│       ├── mmap-write.ck
+│       ├── mmap-zero-len.c
+│       ├── mmap-zero-len.ck
+│       ├── mmap-zero.c
+│       ├── mmap-zero.ck
+│       ├── page-linear.c
+│       ├── page-linear.ck
+│       ├── page-merge-mm.c
+│       ├── page-merge-mm.ck
+│       ├── page-merge-par.c
+│       ├── page-merge-par.ck
+│       ├── page-merge-seq.c
+│       ├── page-merge-seq.ck
+│       ├── page-merge-stk.c
+│       ├── page-merge-stk.ck
+│       ├── page-parallel.c
+│       ├── page-parallel.ck
+│       ├── page-shuffle.c
+│       ├── page-shuffle.ck
+│       ├── parallel-merge.c
+│       ├── parallel-merge.h
+│       ├── process_death.pm
+│       ├── pt-bad-addr.c
+│       ├── pt-bad-addr.ck
+│       ├── pt-bad-read.c
+│       ├── pt-bad-read.ck
+│       ├── pt-big-stk-obj.c
+│       ├── pt-big-stk-obj.ck
+│       ├── pt-grow-bad.c
+│       ├── pt-grow-bad.ck
+│       ├── pt-grow-stack.c
+│       ├── pt-grow-stack.ck
+│       ├── pt-grow-stk-sc.c
+│       ├── pt-grow-stk-sc.ck
+│       ├── pt-write-code.c
+│       ├── pt-write-code.ck
+│       ├── pt-write-code2.c
+│       ├── pt-write-code2.ck
+│       ├── qsort.c
+│       ├── qsort.h
+│       ├── sample.inc
+│       ├── sample.txt
+│       ├── small.inc
+│       ├── small.txt
+│       ├── swap-anon.c
+│       ├── swap-anon.ck
+│       ├── swap-file.c
+│       ├── swap-file.ck
+│       ├── swap-fork.c
+│       ├── swap-fork.ck
+│       ├── swap-iter.c
+│       └── swap-iter.ck
+├── threads
+│   ├── Make.vars
+│   ├── Makefile
+│   ├── build
+│   │   ├── Makefile
+│   │   ├── devices
+│   │   │   ├── disk.d
+│   │   │   ├── disk.o
+│   │   │   ├── input.d
+│   │   │   ├── input.o
+│   │   │   ├── intq.d
+│   │   │   ├── intq.o
+│   │   │   ├── kbd.d
+│   │   │   ├── kbd.o
+│   │   │   ├── serial.d
+│   │   │   ├── serial.o
+│   │   │   ├── timer.d
+│   │   │   ├── timer.o
+│   │   │   ├── vga.d
+│   │   │   └── vga.o
+│   │   ├── kernel.bin
+│   │   ├── kernel.o
+│   │   ├── lib
+│   │   │   ├── arithmetic.d
+│   │   │   ├── arithmetic.o
+│   │   │   ├── debug.d
+│   │   │   ├── debug.o
+│   │   │   ├── kernel
+│   │   │   │   ├── bitmap.d
+│   │   │   │   ├── bitmap.o
+│   │   │   │   ├── console.d
+│   │   │   │   ├── console.o
+│   │   │   │   ├── debug.d
+│   │   │   │   ├── debug.o
+│   │   │   │   ├── hash.d
+│   │   │   │   ├── hash.o
+│   │   │   │   ├── list.d
+│   │   │   │   └── list.o
+│   │   │   ├── random.d
+│   │   │   ├── random.o
+│   │   │   ├── stdio.d
+│   │   │   ├── stdio.o
+│   │   │   ├── stdlib.d
+│   │   │   ├── stdlib.o
+│   │   │   ├── string.d
+│   │   │   ├── string.o
+│   │   │   └── user
+│   │   ├── loader.bin
+│   │   ├── os.dsk
+│   │   ├── tests
+│   │   │   └── threads
+│   │   │       ├── alarm-multiple.errors
+│   │   │       ├── alarm-multiple.output
+│   │   │       ├── alarm-multiple.result
+│   │   │       ├── alarm-negative.d
+│   │   │       ├── alarm-negative.errors
+│   │   │       ├── alarm-negative.o
+│   │   │       ├── alarm-negative.output
+│   │   │       ├── alarm-negative.result
+│   │   │       ├── alarm-priority.d
+│   │   │       ├── alarm-priority.errors
+│   │   │       ├── alarm-priority.o
+│   │   │       ├── alarm-priority.output
+│   │   │       ├── alarm-priority.result
+│   │   │       ├── alarm-simultaneous.d
+│   │   │       ├── alarm-simultaneous.errors
+│   │   │       ├── alarm-simultaneous.o
+│   │   │       ├── alarm-simultaneous.output
+│   │   │       ├── alarm-simultaneous.result
+│   │   │       ├── alarm-single.errors
+│   │   │       ├── alarm-single.output
+│   │   │       ├── alarm-single.result
+│   │   │       ├── alarm-wait.d
+│   │   │       ├── alarm-wait.o
+│   │   │       ├── alarm-zero.d
+│   │   │       ├── alarm-zero.errors
+│   │   │       ├── alarm-zero.o
+│   │   │       ├── alarm-zero.output
+│   │   │       ├── alarm-zero.result
+│   │   │       ├── mlfqs
+│   │   │       │   ├── mlfqs-block.d
+│   │   │       │   ├── mlfqs-block.errors
+│   │   │       │   ├── mlfqs-block.o
+│   │   │       │   ├── mlfqs-block.output
+│   │   │       │   ├── mlfqs-block.result
+│   │   │       │   ├── mlfqs-fair-2.errors
+│   │   │       │   ├── mlfqs-fair-2.output
+│   │   │       │   ├── mlfqs-fair-2.result
+│   │   │       │   ├── mlfqs-fair-20.errors
+│   │   │       │   ├── mlfqs-fair-20.output
+│   │   │       │   ├── mlfqs-fair-20.result
+│   │   │       │   ├── mlfqs-fair.d
+│   │   │       │   ├── mlfqs-fair.o
+│   │   │       │   ├── mlfqs-load-1.d
+│   │   │       │   ├── mlfqs-load-1.errors
+│   │   │       │   ├── mlfqs-load-1.o
+│   │   │       │   ├── mlfqs-load-1.output
+│   │   │       │   ├── mlfqs-load-1.result
+│   │   │       │   ├── mlfqs-load-60.d
+│   │   │       │   ├── mlfqs-load-60.errors
+│   │   │       │   ├── mlfqs-load-60.o
+│   │   │       │   ├── mlfqs-load-60.output
+│   │   │       │   ├── mlfqs-load-60.result
+│   │   │       │   ├── mlfqs-load-avg.d
+│   │   │       │   ├── mlfqs-load-avg.errors
+│   │   │       │   ├── mlfqs-load-avg.o
+│   │   │       │   ├── mlfqs-load-avg.output
+│   │   │       │   ├── mlfqs-load-avg.result
+│   │   │       │   ├── mlfqs-nice-10.errors
+│   │   │       │   ├── mlfqs-nice-10.output
+│   │   │       │   ├── mlfqs-nice-10.result
+│   │   │       │   ├── mlfqs-nice-2.errors
+│   │   │       │   ├── mlfqs-nice-2.output
+│   │   │       │   ├── mlfqs-nice-2.result
+│   │   │       │   ├── mlfqs-recent-1.d
+│   │   │       │   ├── mlfqs-recent-1.errors
+│   │   │       │   ├── mlfqs-recent-1.o
+│   │   │       │   ├── mlfqs-recent-1.output
+│   │   │       │   └── mlfqs-recent-1.result
+│   │   │       ├── priority-change.d
+│   │   │       ├── priority-change.errors
+│   │   │       ├── priority-change.o
+│   │   │       ├── priority-change.output
+│   │   │       ├── priority-change.result
+│   │   │       ├── priority-condvar.d
+│   │   │       ├── priority-condvar.errors
+│   │   │       ├── priority-condvar.o
+│   │   │       ├── priority-condvar.output
+│   │   │       ├── priority-condvar.result
+│   │   │       ├── priority-donate-chain.d
+│   │   │       ├── priority-donate-chain.errors
+│   │   │       ├── priority-donate-chain.o
+│   │   │       ├── priority-donate-chain.output
+│   │   │       ├── priority-donate-chain.result
+│   │   │       ├── priority-donate-lower.d
+│   │   │       ├── priority-donate-lower.errors
+│   │   │       ├── priority-donate-lower.o
+│   │   │       ├── priority-donate-lower.output
+│   │   │       ├── priority-donate-lower.result
+│   │   │       ├── priority-donate-multiple.d
+│   │   │       ├── priority-donate-multiple.errors
+│   │   │       ├── priority-donate-multiple.o
+│   │   │       ├── priority-donate-multiple.output
+│   │   │       ├── priority-donate-multiple.result
+│   │   │       ├── priority-donate-multiple2.d
+│   │   │       ├── priority-donate-multiple2.errors
+│   │   │       ├── priority-donate-multiple2.o
+│   │   │       ├── priority-donate-multiple2.output
+│   │   │       ├── priority-donate-multiple2.result
+│   │   │       ├── priority-donate-nest.d
+│   │   │       ├── priority-donate-nest.errors
+│   │   │       ├── priority-donate-nest.o
+│   │   │       ├── priority-donate-nest.output
+│   │   │       ├── priority-donate-nest.result
+│   │   │       ├── priority-donate-one.d
+│   │   │       ├── priority-donate-one.errors
+│   │   │       ├── priority-donate-one.o
+│   │   │       ├── priority-donate-one.output
+│   │   │       ├── priority-donate-one.result
+│   │   │       ├── priority-donate-sema.d
+│   │   │       ├── priority-donate-sema.errors
+│   │   │       ├── priority-donate-sema.o
+│   │   │       ├── priority-donate-sema.output
+│   │   │       ├── priority-donate-sema.result
+│   │   │       ├── priority-fifo.d
+│   │   │       ├── priority-fifo.errors
+│   │   │       ├── priority-fifo.o
+│   │   │       ├── priority-fifo.output
+│   │   │       ├── priority-fifo.result
+│   │   │       ├── priority-preempt.d
+│   │   │       ├── priority-preempt.errors
+│   │   │       ├── priority-preempt.o
+│   │   │       ├── priority-preempt.output
+│   │   │       ├── priority-preempt.result
+│   │   │       ├── priority-sema.d
+│   │   │       ├── priority-sema.errors
+│   │   │       ├── priority-sema.o
+│   │   │       ├── priority-sema.output
+│   │   │       ├── priority-sema.result
+│   │   │       ├── tests.d
+│   │   │       └── tests.o
+│   │   └── threads
+│   │       ├── init.d
+│   │       ├── init.o
+│   │       ├── interrupt.d
+│   │       ├── interrupt.o
+│   │       ├── intr-stubs.d
+│   │       ├── intr-stubs.o
+│   │       ├── kernel.lds.s
+│   │       ├── loader.o
+│   │       ├── malloc.d
+│   │       ├── malloc.o
+│   │       ├── mmu.d
+│   │       ├── mmu.o
+│   │       ├── palloc.d
+│   │       ├── palloc.o
+│   │       ├── start.d
+│   │       ├── start.o
+│   │       ├── synch.d
+│   │       ├── synch.o
+│   │       ├── thread.d
+│   │       └── thread.o
+│   ├── fixed-point.h
+│   ├── grade_result.txt
+│   ├── init.c
+│   ├── interrupt.c
+│   ├── intr-stubs.S
+│   ├── kernel.lds.S
+│   ├── loader.S
+│   ├── malloc.c
+│   ├── mmu.c
+│   ├── palloc.c
+│   ├── start.S
+│   ├── synch.c
+│   ├── targets.mk
+│   └── thread.c
+├── userprog
+│   ├── Make.vars
+│   ├── Makefile
+│   ├── exception.c
+│   ├── gdt.c
+│   ├── process.c
+│   ├── syscall-entry.S
+│   ├── syscall.c
+│   ├── targets.mk
+│   └── tss.c
+├── utils
+│   ├── backtrace
+│   ├── pintos
+│   └── pintos-mkdisk
+└── vm
+    ├── Make.vars
+    ├── Makefile
+    ├── anon.c
+    ├── file.c
+    ├── inspect.c
+    ├── targets.mk
+    ├── uninit.c
+    └── vm.c
 
 
 

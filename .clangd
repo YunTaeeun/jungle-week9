@@ -1,0 +1,23 @@
+CompileFlags:
+  Add:
+    - -I/workspaces/jungle-week9/pintos
+    - -I/workspaces/jungle-week9/pintos/include
+    - -I/workspaces/jungle-week9/pintos/include/lib
+    - -I/workspaces/jungle-week9/pintos/include/lib/kernel
+    - -nostdinc
+    - -msoft-float
+    - -mcmodel=large
+    - -fno-plt
+    - -fno-pic
+    - -mno-sse
+    - -mno-red-zone
+    - -fno-omit-frame-pointer
+    - -fno-stack-protector
+    - -DUSERPROG
+    - -DFILESYS
+  Remove:
+    - -W*
+Diagnostics:
+  UnusedIncludes: None
+  MissingIncludes: None
+
