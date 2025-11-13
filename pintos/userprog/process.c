@@ -157,6 +157,8 @@ error:
  * Returns -1 on fail. */
 int process_exec(void* f_name)
 {
+    printf("====== [1] process_exec called: %s\n", f_name);
+
     char* file_name = f_name;
     bool success;
 
@@ -173,6 +175,7 @@ int process_exec(void* f_name)
 
     /* And then load the binary */
     success = load(file_name, &_if);
+    printf("====== [3] load result: %s\n", success ? "OK" : "FAIL");
 
     /* If load failed, quit. */
     palloc_free_page(file_name);

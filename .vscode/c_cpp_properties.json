@@ -1,0 +1,23 @@
+{
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": [
+                "${workspaceFolder}/pintos/include",
+                "${workspaceFolder}/pintos/include/lib",
+                "${workspaceFolder}/pintos/include/lib/kernel",
+                "${workspaceFolder}/pintos/lib/kernel",
+                "${workspaceFolder}/pintos/**"
+            ],
+            "defines": [
+                "USERPROG",
+                "FILESYS"
+            ],
+            "compilerPath": "/usr/bin/gcc",
+            "cStandard": "c11",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "linux-gcc-x64"
+        }
+    ],
+    "version": 4
+}

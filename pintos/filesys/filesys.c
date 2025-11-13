@@ -121,8 +121,9 @@ static void do_format(void)
     fat_create();
     fat_close();
 #else
-    free_map_create();
-    if (!dir_create(ROOT_DIR_SECTOR, 16)) PANIC("root directory creation failed");
+    free_map_create();                     // 섹터 0에 free map 생성
+    if (!dir_create(ROOT_DIR_SECTOR, 16))  // 루트 디렉토리 생성
+        PANIC("root directory creation failed");
     free_map_close();
 #endif
 

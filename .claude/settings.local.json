@@ -4,7 +4,8 @@
       "Bash(cat:*)",
       "Bash(echo:*)",
       "Bash(source /workspaces/pintos-team11/pintos/activate)",
-      "Bash(make check:*)"
+      "Bash(make check:*)",
+      "Bash(kill:*)"
     ],
     "deny": [],
     "ask": []
