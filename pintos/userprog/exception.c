@@ -6,6 +6,8 @@
 #include "threads/thread.h"
 #include "intrinsic.h"
 
+// exception.c: 사용자 프로세스가 권한 밖 작업을 수행해서 발생하는 예외 처리
+
 /* Number of page faults processed. */
 static long long page_fault_cnt;
 
