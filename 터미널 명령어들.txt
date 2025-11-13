@@ -1,3 +1,7 @@
+
+
+
+
 cd .. && make clean && make && cd build 
 
 for t in alarm-{single,multiple,simultaneous,priority,zero,negative}; do make tests/threads/$t.result; done
