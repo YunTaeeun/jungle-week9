@@ -22,13 +22,13 @@
  *			복구도구도 없음.
  */
 
-/* The disk that contains the file system. */
+/* 파일 시스템이 저장된 디스크 */
 struct disk* filesys_disk;
 
 static void do_format(void);
 
-/* Initializes the file system module.
- * If FORMAT is true, reformats the file system. */
+/* 파일 시스템 모듈을 초기화한다.
+ * FORMAT이 true이면 파일 시스템을 재포맷한다. */
 void filesys_init(bool format)
 {
     filesys_disk = disk_get(0, 1);
@@ -43,7 +43,7 @@ void filesys_init(bool format)
 
     fat_open();
 #else
-    /* Original FS */
+    /* 기본 파일 시스템 */
     free_map_init();
 
     if (format) do_format();
@@ -52,11 +52,11 @@ void filesys_init(bool format)
 #endif
 }
 
-/* Shuts down the file system module, writing any unwritten data
- * to disk. */
+/* 파일 시스템 모듈을 종료하고, 아직 기록되지 않은 모든 데이터를
+ * 디스크에 기록한다. */
 void filesys_done(void)
 {
-    /* Original FS */
+    /* 기본 파일 시스템 */
 #ifdef EFILESYS
     fat_close();
 #else
@@ -64,27 +64,62 @@ void filesys_done(void)
 #endif
 }
 
-/* Creates a file named NAME with the given INITIAL_SIZE.
- * Returns true if successful, false otherwise.
- * Fails if a file named NAME already exists,
- * or if internal memory allocation fails. */
+/* NAME이라는 이름으로 주어진 INITIAL_SIZE 크기의 파일을 생성한다.
+ * 성공하면 true를, 그렇지 않으면 false를 반환한다.
+ * NAME이라는 이름의 파일이 이미 존재하거나
+ * 내부 메모리 할당이 실패하면 실패한다. */
 bool filesys_create(const char* name, off_t initial_size)
 {
+    printf("[FILESYS_CREATE] Called with name='%s', size=%d\n", name, initial_size);
+
     disk_sector_t inode_sector = 0;
     struct dir* dir = dir_open_root();
-    bool success = (dir != NULL && free_map_allocate(1, &inode_sector) &&
-                    inode_create(inode_sector, initial_size) && dir_add(dir, name, inode_sector));
-    if (!success && inode_sector != 0) free_map_release(inode_sector, 1);
-    dir_close(dir);
 
-    return success;
+    printf("[FILESYS_CREATE] dir_open_root() returned: %p\n", dir);
+    if (dir == NULL) {
+        printf("[FILESYS_CREATE] FAILED: dir is NULL\n");
+        return false;
+    }
+
+    bool alloc_success = free_map_allocate(1, &inode_sector);
+    printf("[FILESYS_CREATE] free_map_allocate() returned: %d, sector=%d\n", alloc_success, inode_sector);
+
+    if (!alloc_success) {
+        printf("[FILESYS_CREATE] FAILED: free_map_allocate failed\n");
+        dir_close(dir);
+        return false;
+    }
+
+    bool inode_success = inode_create(inode_sector, initial_size);
+    printf("[FILESYS_CREATE] inode_create() returned: %d\n", inode_success);
+
+    if (!inode_success) {
+        printf("[FILESYS_CREATE] FAILED: inode_create failed\n");
+        free_map_release(inode_sector, 1);
+        dir_close(dir);
+        return false;
+    }
+
+    bool dir_add_success = dir_add(dir, name, inode_sector);
+    printf("[FILESYS_CREATE] dir_add() returned: %d\n", dir_add_success);
+
+    if (!dir_add_success) {
+        printf("[FILESYS_CREATE] FAILED: dir_add failed\n");
+        free_map_release(inode_sector, 1);
+        dir_close(dir);
+        return false;
+    }
+
+    dir_close(dir);
+    printf("[FILESYS_CREATE] SUCCESS\n");
+    return true;
 }
 
-/* Opens the file with the given NAME.
- * Returns the new file if successful or a null pointer
- * otherwise.
- * Fails if no file named NAME exists,
- * or if an internal memory allocation fails. */
+/* 주어진 NAME을 가진 파일을 연다.
+ * 성공하면 새 파일을 반환하고, 그렇지 않으면
+ * null 포인터를 반환한다.
+ * NAME이라는 이름의 파일이 존재하지 않거나
+ * 내부 메모리 할당이 실패하면 실패한다. */
 struct file* filesys_open(const char* name)
 {
     struct dir* dir = dir_open_root();
@@ -96,10 +131,10 @@ struct file* filesys_open(const char* name)
     return file_open(inode);
 }
 
-/* Deletes the file named NAME.
- * Returns true if successful, false on failure.
- * Fails if no file named NAME exists,
- * or if an internal memory allocation fails.
+/* NAME이라는 이름의 파일을 삭제한다.
+ * 성공하면 true를, 실패하면 false를 반환한다.
+ * NAME이라는 이름의 파일이 존재하지 않거나
+ * 내부 메모리 할당이 실패하면 실패한다.
  * 파일을 삭제해도 해당 파일이 열려 있다면 블록이 해제되지 않고,
  * 열려 있는 모든 스레드가 닫을 때까지 계속 접근할 수 있음 */
 bool filesys_remove(const char* name)
@@ -111,13 +146,13 @@ bool filesys_remove(const char* name)
     return success;
 }
 
-/* Formats the file system. */
+/* 파일 시스템을 포맷한다. */
 static void do_format(void)
 {
     printf("Formatting file system...");
 
 #ifdef EFILESYS
-    /* Create FAT and save it to the disk. */
+    /* FAT를 생성하고 디스크에 저장한다. */
     fat_create();
     fat_close();
 #else

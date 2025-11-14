@@ -74,7 +74,7 @@ int main(void)
 
     /* Break command line into arguments and parse options. */
     argv = read_command_line();
-    argv = parse_options(argv);
+    argv = parse_options(argv);  // 옵션 아닌 부분들 argv에 반환 ["run", "args-single onearg", NULL]
 
     /* Initialize ourselves as a thread so we can use locks,
        then enable console locking. */
@@ -118,7 +118,7 @@ int main(void)
     printf("Boot complete.\n");
 
     /* Run actions specified on kernel command line. */
-    run_actions(argv);
+    run_actions(argv);  // ["run", "args-single onearg", NULL]
 
     /* Finish up. */
     if (power_off_when_done) power_off();
@@ -164,8 +164,7 @@ static void paging_init(uint64_t mem_end)
     pml4_activate(0);
 }
 
-/* Breaks the kernel command line into words and returns them as
-   an argv-like array. */
+/* 커널 명령어를 띄어쓰기 기준으로 잘라서 argv-like 배열에 넣는다 */
 static char** read_command_line(void)
 {
     static char* argv[LOADER_ARGS_LEN / 2 + 1];
@@ -197,8 +196,7 @@ static char** read_command_line(void)
     return argv;
 }
 
-/* Parses options in ARGV[]
-   and returns the first non-option argument. */
+/* 커널의 옵션을 파싱하는 함수 */
 static char** parse_options(char** argv)
 {
     for (; *argv != NULL && **argv == '-'; argv++)
@@ -237,14 +235,9 @@ static void run_task(char** argv)
 {
     const char* task = argv[1];
 
-    // 디버깅용 코드 시작
-    printf("========================================\n");
     printf("[DEBUG] run_task CALLED\n");
-    printf("[DEBUG] argv[1]: %s\n", argv[1]);
-    printf("========================================\n");
-    // 디버깅용 코드 끝
+    printf("[run_task] argv[1]: %s\n", argv[1]);  // argv[1] = args-single onearg
 
-    printf("Executing '%s':\n", task);
 #ifdef USERPROG
     if (thread_tests)
     {
@@ -257,32 +250,22 @@ static void run_task(char** argv)
 #else
     run_test(task);
 #endif
-    // 디버깅용 코드 시작
-    printf("[DEBUG-1] Before printf Executing\n");
-    printf("Executing '%s':\n", task);
 
-    printf("[DEBUG-2] Before process_execute/exec call\n");
-    tid_t pid = process_exec(task);  // 또는 process_exec
-    printf("[DEBUG-3] After process_execute/exec, pid = %d\n", pid);
-
-    printf("[DEBUG-4] Before process_wait\n");
-    process_wait(pid);
-
-    printf("[DEBUG-5] After process_wait\n");
-    // 디버깅용 코드 끝
-
-    printf("Execution of '%s' complete.\n", task);
+    printf("[run_task] Execution of '%s' complete.\n", task);
 }
 
 /* Executes all of the actions specified in ARGV[]
    up to the null pointer sentinel. */
 static void run_actions(char** argv)
 {
-    // ⭐ 디버깅용 코드
-    printf("========================================\n");
-    printf("[DEBUG] run_action CALLED\n");
-    printf("[DEBUG] argv[1]: %s\n", argv[1]);
-    printf("========================================\n");
+    // ⭐ 디버깅용 코드 : ["run", "args-single onearg", NULL]
+    printf("[DEBUG] run_actions CALLED\n");
+
+    // 모든 argv 출력
+    for (int i = 0; argv[i] != NULL; i++)
+    {
+        printf("[run_actions] argv[%d]: %s\n", i, argv[i]);
+    }
 
     /* An action. */
     struct action
@@ -307,6 +290,8 @@ static void run_actions(char** argv)
         const struct action* a;
         int i;
 
+        printf("[run_actions] Processing action: %s\n", *argv);
+
         /* Find action name. */
         for (a = actions;; a++)
             if (a->name == NULL)
@@ -314,17 +299,21 @@ static void run_actions(char** argv)
             else if (!strcmp(*argv, a->name))
                 break;
 
+        printf("[run_actions] Found action '%s', argc=%d\n", a->name, a->argc);
+
         /* Check for required arguments. */
         for (i = 1; i < a->argc; i++)
             if (argv[i] == NULL) PANIC("action `%s' requires %d argument(s)", *argv, a->argc - 1);
 
         /* Invoke action and advance. */
+        printf("[run_actions] Calling function for '%s'\n", a->name);
         a->function(argv);
+        printf("[run_actions] Finished '%s', advancing by %d\n", a->name, a->argc);
         argv += a->argc;
     }
 
     // ⭐ 디버깅용 코드
-    printf("[DEBUG] run_action END\n");
+    printf("[run_actions] run_action END\n");
 }
 
 /* Prints a kernel command line help message and powers off the
