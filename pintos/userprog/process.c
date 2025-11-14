@@ -52,7 +52,8 @@ tid_t process_create_initd(const char* file_name)
     fn_copy = palloc_get_page(0);
     printf("[PROCESS_CREATE_INITD] palloc_get_page returned: %p\n", fn_copy);
 
-    if (fn_copy == NULL) {
+    if (fn_copy == NULL)
+    {
         printf("[PROCESS_CREATE_INITD] FAILED: palloc_get_page returned NULL\n");
         return TID_ERROR;
     }
@@ -65,10 +66,13 @@ tid_t process_create_initd(const char* file_name)
     tid = thread_create(file_name, PRI_DEFAULT, initd, fn_copy);
     printf("[PROCESS_CREATE_INITD] thread_create returned tid=%d\n", tid);
 
-    if (tid == TID_ERROR) {
+    if (tid == TID_ERROR)
+    {
         printf("[PROCESS_CREATE_INITD] FAILED: thread_create returned TID_ERROR\n");
         palloc_free_page(fn_copy);
-    } else {
+    }
+    else
+    {
         printf("[PROCESS_CREATE_INITD] SUCCESS: created thread %d\n", tid);
     }
 
@@ -181,7 +185,7 @@ error:
  * 실패 시 -1을 반환합니다. */
 int process_exec(void* f_name)
 {
-    printf("====== [1] process_exec called: %s\n", f_name);
+    printf("[process_exec] process_exec called: %s\n", f_name);
 
     char* file_name = f_name;
     bool success;
@@ -198,7 +202,7 @@ int process_exec(void* f_name)
 
     /* 그런 다음 바이너리를 로드합니다 */
     success = load(file_name, &_if);
-    printf("====== [3] load result: %s\n", success ? "OK" : "FAIL");
+    printf("[process_exec] load result: %s\n", success ? "OK" : "FAIL");
 
     /* 로드에 실패하면 종료합니다. */
     palloc_free_page(file_name);
@@ -224,7 +228,8 @@ int process_wait(tid_t child_tid UNUSED)
      * XXX:       process_wait를 구현하기 전에 여기에 무한 루프를 추가하는 것을 권장합니다. */
 
     printf("[PROCESS_WAIT] Entering infinite loop to keep process alive...\n");
-    for (;;) {
+    for (;;)
+    {
         // 무한 루프: 프로세스가 종료될 때까지 대기
     }
 
@@ -343,14 +348,15 @@ static bool load_segment(struct file* file, off_t ofs, uint8_t* upage, uint32_t 
 /* FILE_NAME에서 ELF 실행 파일을 현재 스레드로 로드합니다.
  * 실행 파일의 진입점을 *RIP에 저장하고
  * 초기 스택 포인터를 *RSP에 저장합니다.
+ * 스택에 인자들이 있어야 유저 프로세스가 실행될 수 있습니다.
  * 성공하면 true를, 그렇지 않으면 false를 반환합니다. */
 static bool load(const char* file_name, struct intr_frame* if_)
 {
     static int load_call_count = 0;
     load_call_count++;
-    printf("====== [2] load() called (count: %d) with: %s\n", load_call_count, file_name);
-    printf("====== [2] load() caller address: %p\n", __builtin_return_address(0));
-    printf("====== [2] thread name: %s, tid: %d\n", thread_current()->name, thread_current()->tid);
+    printf("[load] called (count: %d) with: %s\n", load_call_count, file_name);
+    printf("[load] caller address: %p\n", __builtin_return_address(0));
+    printf("[load] thread name: %s, tid: %d\n", thread_current()->name, thread_current()->tid);
 
     struct thread* t = thread_current();
     struct ELF ehdr;
@@ -375,33 +381,27 @@ static bool load(const char* file_name, struct intr_frame* if_)
 
         char* token;
         char* saveptr;
+        char* argv[128];  // 인자를 담기위한 포인터 배열 (충분한 크기로 선언)
+        int argc = 0;
 
-        // 첫번째 호출: 파일명 (최대 14자)
-        // strtok_r은 원본 문자열에 \0 을 삽입해서 토큰을 만든다 > 원본 문자열 수정!
+        // 첫 번째 토큰: 파일명
         token = strtok_r(file_name_copy, " ", &saveptr);
         if (token != NULL)
         {
             strlcpy(file_name_only, token, NAME_MAX + 1);
-        }
-        // printf("===> file_name_only: %s\n", file_name_only);
-
-        // 나머지 인자들
-        char* arguments = strchr(file_name_only, " ");
-        int argc = 0;
-        while (arguments != NULL)
-        {
-            argc++;
-            arguments = strchr(arguments + 1, " ");
+            argv[argc++] = token;  // argv[0] = 파일명
         }
 
-        char* argv[argc];  // 인자를 담기위한 포인터 배열
-        int i = 0;
-
+        // 나머지 토큰들: 인자들
         while ((token = strtok_r(NULL, " ", &saveptr)) != NULL)
         {
-            argv[i] = token;
-            i++;
-            // printf("===> arg: %s\n", token);
+            argv[argc++] = token;
+        }
+
+        printf("[LOAD] Parsed %d arguments:\n", argc);
+        for (int i = 0; i < argc; i++)
+        {
+            printf("[LOAD]   argv[%d] = '%s'\n", i, argv[i]);
         }
 
         /* 페이지 디렉토리를 할당하고 활성화합니다. */
@@ -416,7 +416,7 @@ static bool load(const char* file_name, struct intr_frame* if_)
             printf("load: %s: open failed\n", file_name_copy);
             goto done;
         }
-        printf("[DEBUG]=====> 1");
+
         /* 실행 파일 헤더를 읽고 검증합니다. */
         if (file_read(file, &ehdr, sizeof ehdr) != sizeof ehdr ||
             memcmp(ehdr.e_ident, "\177ELF\2\1\1", 7) || ehdr.e_type != 2 ||
@@ -427,8 +427,6 @@ static bool load(const char* file_name, struct intr_frame* if_)
             printf("load: %s: error loading executable\n", file_name);
             goto done;
         }
-
-        printf("[DEBUG]=====> 2");
 
         /* 프로그램 헤더들을 읽습니다. */
         file_ofs = ehdr.e_phoff;
@@ -493,21 +491,77 @@ static bool load(const char* file_name, struct intr_frame* if_)
         /* 시작 주소. */
         if_->rip = ehdr.e_entry;
 
-        printf("[DEBUG]=====> argv[argc]: %s", argv[argc]);
+        /* 커널 메모리에서 유저 메모리로 문자열을 복사한다 (1~7)*/
+        // 1. 문자열을 스택에 복사
+        uintptr_t rsp = USER_STACK;  // 스택이 시작하는 주소
+        char* arg_addr[128];
 
-        /* TODO: 여기에 코드를 작성하세요.
-         * TODO: 인자 전달을 구현하세요 (project2/argument_passing.html 참고). */
+        for (int i = argc - 1; i >= 0; i--)
+        {
+            int len = strlen(argv[i]) + 1;     // 인자의 길이(널센티널 포함)
+            rsp -= len;                        // 스택 포인터를 문자열길이만큼 줄인다
+            memcpy((void*)rsp, argv[i], len);  // 실제 문자열을 스택
+            // NOTE: (void*)이유? > memcpy시그니처. 이 숫자를 메모리 주소로 해석하라는 의미.
+            arg_addr[i] =
+                (char*)rsp;  // 나중에 포인터 배열을 만들기 위해 각 문자열의 주소를 저장한다
+        }
 
-        // 8바이트 정렬
+        // 2. 8바이트 정렬
+        while (rsp % 8 != 0)  // 8의 배수인지 아닌지 확인해서 8바이트 정렬 확인
+        {
+            rsp--;               // 1바이트 공간 확보하고
+            *(uint8_t*)rsp = 0;  // 그 주소에 0 쓰기
+        }
+
+        // 3. argv[argc] = null
+        rsp -= 8;             // null이 몇바이트인지 모르겠지만 정렬 위해 8 줄인다
+        *(char**)rsp = NULL;  // TODO: 포인터 모르겠다.
+
+        // 4. 포인터 배열 역순
+        for (int i = argc - 1; i >= 0; i--)
+        {
+            rsp -= 8;                    // 정렬 위해 8 줄인다
+            *(char**)rsp = arg_addr[i];  // 포인터 저장
+        }
+
+        // 5. argv 주소 저장
+        char** argv_ptr = (char**)rsp;  // rsp가 정수형이니까 포인터 타입으로 변환
+
+        // 6. fake return addr
+        // 일반 함수 호출시, caller가 return address를 스택에 푸시하는데, main 함수는 첫번째
+        // 함수라서 호출자가 없다 그래도 x86-64 ABI는 return address가 있다고 가정하므로 가짜
+        // 리턴주소를 넣어준다.
+        rsp -= 8;
+        *(void**)rsp = 0;  // 만약 실수로 return하면 0 주소로 점프 → 즉시 page fault 발생 for 디버깅
+
+        // 7. 레지스터 설정
         if_->R.rdi = argc;
-        if_->R.rsi = argv;
-
-        // rdi, rsi, rdx
+        if_->R.rsi = (uint64_t)argv_ptr;
+        if_->rsp = rsp;
 
         success = true;
+
+        /* 유저메모리
+        높은 주소 (0x47480000)
+        ┌─────────────────────┐
+        │ "args-single\0"     │ <- arg_addr[0]이 여기 가리킴
+        │ "onearg\0"          │ <- arg_addr[1]이 여기 가리킴
+        ├─────────────────────┤
+        │ 0 0 0 (패딩)        │ <- rsp % 8 == 0 되도록
+        ├─────────────────────┤
+        │ NULL (8 bytes)      │ <- argv[2] = NULL
+        ├─────────────────────┤
+        │ arg_addr[1]         │ <- argv[1] 포인터
+        │ arg_addr[0]         │ <- argv[0] 포인터
+        ├─────────────────────┤ <- argv_ptr가 여기
+        │ 0 (8 bytes)         │ <- fake return address
+        └─────────────────────┘ <- rsp (최종 위치)
+        낮은 주소*/
     }
+
 done:
     /* 로드 성공 여부와 관계없이 여기에 도달합니다. */
+    palloc_free_page(file_name_copy);  // palloc_get_page()로 할당했으므로 palloc_free_page()로 해제
     file_close(file);
     return success;
 }
