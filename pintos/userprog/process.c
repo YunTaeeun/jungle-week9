@@ -222,12 +222,13 @@ int process_exec(void* f_name)
  * 이 함수는 문제 2-2에서 구현될 것입니다. 지금은 아무것도 하지 않습니다. */
 int process_wait(tid_t child_tid UNUSED)
 {
-    printf("[PROCESS_WAIT] Called with child_tid=%d\n", child_tid);
+    // printf("[PROCESS_WAIT] Called with child_tid=%d\n", child_tid);
 
     /* XXX: 힌트) process_wait (initd)를 하면 pintos가 종료됩니다.
      * XXX:       process_wait를 구현하기 전에 여기에 무한 루프를 추가하는 것을 권장합니다. */
 
-    printf("[PROCESS_WAIT] Entering infinite loop to keep process alive...\n");
+    // printf("[PROCESS_WAIT] Entering infinite loop to keep process alive...\n");
+    // CPU를 양보하면서 대기 (자식이 실행될 수 있도록)
     for (;;)
     {
         // 무한 루프: 프로세스가 종료될 때까지 대기
@@ -375,189 +376,184 @@ static bool load(const char* file_name, struct intr_frame* if_)
 
     if (file_name_copy == NULL) goto done;
 
+    strlcpy(file_name_copy, file_name,
+            PGSIZE);  //"파일명 인자" 명령 전체 복사 (strtok_r 전에 원본 문자 보존)
+
+    char* token;
+    char* saveptr;
+    char* argv[128];  // 인자를 담기위한 포인터 배열 (충분한 크기로 선언)
+    int argc = 0;
+
+    // 첫 번째 토큰: 파일명
+    token = strtok_r(file_name_copy, " ", &saveptr);
+    if (token != NULL)
     {
-        strlcpy(file_name_copy, file_name,
-                PGSIZE);  //"파일명 인자" 명령 전체 복사 (strtok_r 전에 원본 문자 보존)
+        strlcpy(file_name_only, token, NAME_MAX + 1);
+        argv[argc++] = token;  // argv[0] = 파일명
+    }
 
-        char* token;
-        char* saveptr;
-        char* argv[128];  // 인자를 담기위한 포인터 배열 (충분한 크기로 선언)
-        int argc = 0;
+    // 나머지 토큰들: 인자들
+    while ((token = strtok_r(NULL, " ", &saveptr)) != NULL)
+    {
+        argv[argc++] = token;
+    }
 
-        // 첫 번째 토큰: 파일명
-        token = strtok_r(file_name_copy, " ", &saveptr);
-        if (token != NULL)
+    printf("[LOAD] Parsed %d arguments:\n", argc);
+    for (int i = 0; i < argc; i++)
+    {
+        printf("[LOAD]   argv[%d] = '%s'\n", i, argv[i]);
+    }
+
+    /* 페이지 디렉토리를 할당하고 활성화합니다. */
+    t->pml4 = pml4_create();
+    if (t->pml4 == NULL) goto done;
+    process_activate(thread_current());
+
+    /* 실행 파일을 엽니다. */
+    file = filesys_open(file_name_only);
+    if (file == NULL)
+    {
+        printf("load: %s: open failed\n", file_name_only);
+        goto done;
+    }
+
+    /* 실행 파일 헤더를 읽고 검증합니다. */
+    if (file_read(file, &ehdr, sizeof ehdr) != sizeof ehdr ||
+        memcmp(ehdr.e_ident, "\177ELF\2\1\1", 7) || ehdr.e_type != 2 ||
+        ehdr.e_machine != 0x3E  // amd64
+        || ehdr.e_version != 1 || ehdr.e_phentsize != sizeof(struct Phdr) || ehdr.e_phnum > 1024)
+    {
+        printf("load: %s: error loading executable\n", file_name);
+        goto done;
+    }
+
+    /* 프로그램 헤더들을 읽습니다. */
+    file_ofs = ehdr.e_phoff;
+    for (i = 0; i < ehdr.e_phnum; i++)
+    {
+        struct Phdr phdr;
+
+        if (file_ofs < 0 || file_ofs > file_length(file)) goto done;
+        file_seek(file, file_ofs);
+
+        if (file_read(file, &phdr, sizeof phdr) != sizeof phdr) goto done;
+        file_ofs += sizeof phdr;
+        switch (phdr.p_type)
         {
-            strlcpy(file_name_only, token, NAME_MAX + 1);
-            argv[argc++] = token;  // argv[0] = 파일명
-        }
-
-        // 나머지 토큰들: 인자들
-        while ((token = strtok_r(NULL, " ", &saveptr)) != NULL)
-        {
-            argv[argc++] = token;
-        }
-
-        printf("[LOAD] Parsed %d arguments:\n", argc);
-        for (int i = 0; i < argc; i++)
-        {
-            printf("[LOAD]   argv[%d] = '%s'\n", i, argv[i]);
-        }
-
-        /* 페이지 디렉토리를 할당하고 활성화합니다. */
-        t->pml4 = pml4_create();
-        if (t->pml4 == NULL) goto done;
-        process_activate(thread_current());
-
-        /* 실행 파일을 엽니다. */
-        file = filesys_open(file_name_copy);
-        if (file == NULL)
-        {
-            printf("load: %s: open failed\n", file_name_copy);
-            goto done;
-        }
-
-        /* 실행 파일 헤더를 읽고 검증합니다. */
-        if (file_read(file, &ehdr, sizeof ehdr) != sizeof ehdr ||
-            memcmp(ehdr.e_ident, "\177ELF\2\1\1", 7) || ehdr.e_type != 2 ||
-            ehdr.e_machine != 0x3E  // amd64
-            || ehdr.e_version != 1 || ehdr.e_phentsize != sizeof(struct Phdr) ||
-            ehdr.e_phnum > 1024)
-        {
-            printf("load: %s: error loading executable\n", file_name);
-            goto done;
-        }
-
-        /* 프로그램 헤더들을 읽습니다. */
-        file_ofs = ehdr.e_phoff;
-        for (i = 0; i < ehdr.e_phnum; i++)
-        {
-            struct Phdr phdr;
-
-            if (file_ofs < 0 || file_ofs > file_length(file)) goto done;
-            file_seek(file, file_ofs);
-
-            if (file_read(file, &phdr, sizeof phdr) != sizeof phdr) goto done;
-            file_ofs += sizeof phdr;
-            switch (phdr.p_type)
-            {
-                case PT_NULL:
-                case PT_NOTE:
-                case PT_PHDR:
-                case PT_STACK:
-                default:
-                    /* 이 세그먼트를 무시합니다. */
-                    break;
-                case PT_DYNAMIC:
-                case PT_INTERP:
-                case PT_SHLIB:
-                    goto done;
-                case PT_LOAD:
-                    if (validate_segment(&phdr, file))
+            case PT_NULL:
+            case PT_NOTE:
+            case PT_PHDR:
+            case PT_STACK:
+            default:
+                /* 이 세그먼트를 무시합니다. */
+                break;
+            case PT_DYNAMIC:
+            case PT_INTERP:
+            case PT_SHLIB:
+                goto done;
+            case PT_LOAD:
+                if (validate_segment(&phdr, file))
+                {
+                    bool writable = (phdr.p_flags & PF_W) != 0;
+                    uint64_t file_page = phdr.p_offset & ~PGMASK;
+                    uint64_t mem_page = phdr.p_vaddr & ~PGMASK;
+                    uint64_t page_offset = phdr.p_vaddr & PGMASK;
+                    uint32_t read_bytes, zero_bytes;
+                    if (phdr.p_filesz > 0)
                     {
-                        bool writable = (phdr.p_flags & PF_W) != 0;
-                        uint64_t file_page = phdr.p_offset & ~PGMASK;
-                        uint64_t mem_page = phdr.p_vaddr & ~PGMASK;
-                        uint64_t page_offset = phdr.p_vaddr & PGMASK;
-                        uint32_t read_bytes, zero_bytes;
-                        if (phdr.p_filesz > 0)
-                        {
-                            /* 일반 세그먼트.
-                             * 디스크에서 초기 부분을 읽고 나머지는 0으로 채웁니다. */
-                            read_bytes = page_offset + phdr.p_filesz;
-                            zero_bytes =
-                                (ROUND_UP(page_offset + phdr.p_memsz, PGSIZE) - read_bytes);
-                        }
-                        else
-                        {
-                            /* 전부 0.
-                             * 디스크에서 아무것도 읽지 않습니다. */
-                            read_bytes = 0;
-                            zero_bytes = ROUND_UP(page_offset + phdr.p_memsz, PGSIZE);
-                        }
-                        if (!load_segment(file, file_page, (void*)mem_page, read_bytes, zero_bytes,
-                                          writable))
-                            goto done;
+                        /* 일반 세그먼트.
+                         * 디스크에서 초기 부분을 읽고 나머지는 0으로 채웁니다. */
+                        read_bytes = page_offset + phdr.p_filesz;
+                        zero_bytes = (ROUND_UP(page_offset + phdr.p_memsz, PGSIZE) - read_bytes);
                     }
                     else
+                    {
+                        /* 전부 0.
+                         * 디스크에서 아무것도 읽지 않습니다. */
+                        read_bytes = 0;
+                        zero_bytes = ROUND_UP(page_offset + phdr.p_memsz, PGSIZE);
+                    }
+                    if (!load_segment(file, file_page, (void*)mem_page, read_bytes, zero_bytes,
+                                      writable))
                         goto done;
-                    break;
-            }
+                }
+                else
+                    goto done;
+                break;
         }
-
-        /* 스택을 설정합니다. */
-        if (!setup_stack(if_)) goto done;
-
-        /* 시작 주소. */
-        if_->rip = ehdr.e_entry;
-
-        /* 커널 메모리에서 유저 메모리로 문자열을 복사한다 (1~7)*/
-        // 1. 문자열을 스택에 복사
-        uintptr_t rsp = USER_STACK;  // 스택이 시작하는 주소
-        char* arg_addr[128];
-
-        for (int i = argc - 1; i >= 0; i--)
-        {
-            int len = strlen(argv[i]) + 1;     // 인자의 길이(널센티널 포함)
-            rsp -= len;                        // 스택 포인터를 문자열길이만큼 줄인다
-            memcpy((void*)rsp, argv[i], len);  // 실제 문자열을 스택
-            // NOTE: (void*)이유? > memcpy시그니처. 이 숫자를 메모리 주소로 해석하라는 의미.
-            arg_addr[i] =
-                (char*)rsp;  // 나중에 포인터 배열을 만들기 위해 각 문자열의 주소를 저장한다
-        }
-
-        // 2. 8바이트 정렬
-        while (rsp % 8 != 0)  // 8의 배수인지 아닌지 확인해서 8바이트 정렬 확인
-        {
-            rsp--;               // 1바이트 공간 확보하고
-            *(uint8_t*)rsp = 0;  // 그 주소에 0 쓰기
-        }
-
-        // 3. argv[argc] = null
-        rsp -= 8;             // null이 몇바이트인지 모르겠지만 정렬 위해 8 줄인다
-        *(char**)rsp = NULL;  // TODO: 포인터 모르겠다.
-
-        // 4. 포인터 배열 역순
-        for (int i = argc - 1; i >= 0; i--)
-        {
-            rsp -= 8;                    // 정렬 위해 8 줄인다
-            *(char**)rsp = arg_addr[i];  // 포인터 저장
-        }
-
-        // 5. argv 주소 저장
-        char** argv_ptr = (char**)rsp;  // rsp가 정수형이니까 포인터 타입으로 변환
-
-        // 6. fake return addr
-        // 일반 함수 호출시, caller가 return address를 스택에 푸시하는데, main 함수는 첫번째
-        // 함수라서 호출자가 없다 그래도 x86-64 ABI는 return address가 있다고 가정하므로 가짜
-        // 리턴주소를 넣어준다.
-        rsp -= 8;
-        *(void**)rsp = 0;  // 만약 실수로 return하면 0 주소로 점프 → 즉시 page fault 발생 for 디버깅
-
-        // 7. 레지스터 설정
-        if_->R.rdi = argc;
-        if_->R.rsi = (uint64_t)argv_ptr;
-        if_->rsp = rsp;
-
-        success = true;
-
-        /* 유저메모리
-        높은 주소 (0x47480000)
-        ┌─────────────────────┐
-        │ "args-single\0"     │ <- arg_addr[0]이 여기 가리킴
-        │ "onearg\0"          │ <- arg_addr[1]이 여기 가리킴
-        ├─────────────────────┤
-        │ 0 0 0 (패딩)        │ <- rsp % 8 == 0 되도록
-        ├─────────────────────┤
-        │ NULL (8 bytes)      │ <- argv[2] = NULL
-        ├─────────────────────┤
-        │ arg_addr[1]         │ <- argv[1] 포인터
-        │ arg_addr[0]         │ <- argv[0] 포인터
-        ├─────────────────────┤ <- argv_ptr가 여기
-        │ 0 (8 bytes)         │ <- fake return address
-        └─────────────────────┘ <- rsp (최종 위치)
-        낮은 주소*/
     }
+
+    /* 스택을 설정합니다. */
+    if (!setup_stack(if_)) goto done;
+
+    /* 시작 주소. */
+    if_->rip = ehdr.e_entry;
+
+    /* 커널 메모리에서 유저 메모리로 문자열을 복사한다 (1~7)*/
+    // 1. 문자열을 스택에 복사
+    uintptr_t rsp = USER_STACK;  // 스택이 시작하는 주소
+    char* arg_addr[128];
+
+    for (int i = argc - 1; i >= 0; i--)
+    {
+        int len = strlen(argv[i]) + 1;     // 인자의 길이(널센티널 포함)
+        rsp -= len;                        // 스택 포인터를 문자열길이만큼 줄인다
+        memcpy((void*)rsp, argv[i], len);  // 실제 문자열을 스택
+        // NOTE: (void*)이유? > memcpy시그니처. 이 숫자를 메모리 주소로 해석하라는 의미.
+        arg_addr[i] = (char*)rsp;  // 나중에 포인터 배열을 만들기 위해 각 문자열의 주소를 저장한다
+    }
+
+    // 2. 8바이트 정렬
+    while (rsp % 8 != 0)  // 8의 배수인지 아닌지 확인해서 8바이트 정렬 확인
+    {
+        rsp--;               // 1바이트 공간 확보하고
+        *(uint8_t*)rsp = 0;  // 그 주소에 0 쓰기
+    }
+
+    // 3. argv[argc] = null
+    rsp -= 8;             // null이 몇바이트인지 모르겠지만 정렬 위해 8 줄인다
+    *(char**)rsp = NULL;  // TODO: 포인터 모르겠다.
+
+    // 4. 포인터 배열 역순
+    for (int i = argc - 1; i >= 0; i--)
+    {
+        rsp -= 8;                    // 정렬 위해 8 줄인다
+        *(char**)rsp = arg_addr[i];  // 포인터 저장
+    }
+
+    // 5. argv 주소 저장
+    char** argv_ptr = (char**)rsp;  // rsp가 정수형이니까 포인터 타입으로 변환
+
+    // 6. fake return addr
+    // 일반 함수 호출시, caller가 return address를 스택에 푸시하는데, main 함수는 첫번째
+    // 함수라서 호출자가 없다 그래도 x86-64 ABI는 return address가 있다고 가정하므로 가짜
+    // 리턴주소를 넣어준다.
+    rsp -= 8;
+    *(void**)rsp = 0;  // 만약 실수로 return하면 0 주소로 점프 → 즉시 page fault 발생 for 디버깅
+
+    // 7. 레지스터 설정
+    if_->R.rdi = argc;
+    if_->R.rsi = (uint64_t)argv_ptr;
+    if_->rsp = rsp;
+
+    success = true;
+
+    /* 유저메모리
+    높은 주소 (0x47480000)
+    ┌─────────────────────┐
+    │ "args-single\0"     │ <- arg_addr[0]이 여기 가리킴
+    │ "onearg\0"          │ <- arg_addr[1]이 여기 가리킴
+    ├─────────────────────┤
+    │ 0 0 0 (패딩)        │ <- rsp % 8 == 0 되도록
+    ├─────────────────────┤
+    │ NULL (8 bytes)      │ <- argv[2] = NULL
+    ├─────────────────────┤
+    │ arg_addr[1]         │ <- argv[1] 포인터
+    │ arg_addr[0]         │ <- argv[0] 포인터
+    ├─────────────────────┤ <- argv_ptr가 여기
+    │ 0 (8 bytes)         │ <- fake return address
+    └─────────────────────┘ <- rsp (최종 위치)
+    낮은 주소*/
 
 done:
     /* 로드 성공 여부와 관계없이 여기에 도달합니다. */

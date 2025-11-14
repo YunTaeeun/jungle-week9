@@ -12,6 +12,7 @@
 
 void syscall_entry(void);
 void syscall_handler(struct intr_frame*);
+bool is_valid_buffer(const void* buffer, unsigned length);
 
 /* 시스템 콜 처리
  *
@@ -44,20 +45,21 @@ void syscall_handler(struct intr_frame* f UNUSED)
 
     // RAX 레지스터에 시스템 콜 번호가 저장되어 있음
     int syscall_number = f->R.rax;
+    printf("[SYSCALL_HANDLER] syscall_number=%d\n", syscall_number);
 
     // 인자 가져오기
     uint64_t arg1 = f->R.rdi;
     uint64_t arg2 = f->R.rsi;
     uint64_t arg3 = f->R.rdx;
-    uint64_t arg3 = f->R.r10;
+    uint64_t arg4 = f->R.r10;
 
     switch (syscall_number)
     {
         case SYS_HALT:
-            power_off();
+            halt();
             break;
         case SYS_EXIT:
-            // exit 구현
+            exit((int)arg1);
             break;
         case SYS_FORK:
             // fork 구현
@@ -78,13 +80,15 @@ void syscall_handler(struct intr_frame* f UNUSED)
             // open 구현
             break;
         case SYS_FILESIZE:  // TODO:
-            filesize(0);
+            // filesize(0);
             break;
         case SYS_READ:
             // read 구현
             break;
         case SYS_WRITE:
-            write();
+            printf("[SYSCALL_SYS_WRITE] called: fd=%d, buffer=%p, length=%u\n", (int)arg1,
+                   (void*)arg2, (unsigned)arg3);
+            f->R.rax = write((int)arg1, (const void*)arg2, (unsigned)arg3);
             break;
         case SYS_SEEK:
             // seek 구현
@@ -96,18 +100,89 @@ void syscall_handler(struct intr_frame* f UNUSED)
             // close 구현
             break;
         default:
-            thread_exit();
+            printf("Unknown system call: %d\n", syscall_number);
             break;
     }
 
+    printf("[SYSCALL_HANDLER] Finished handling syscall %d\n", syscall_number);
+    printf("[SYSCALL_HANDLER] About to call thread_exit()\n");
     printf("system call!\n");
     thread_exit();
 }
 
+// 시스템 종료
+void halt(void)
+{
+    power_off();
+}
+
+// 프로세스 종료
+void exit(int status)
+{
+    struct thread* curr = thread_current();
+    printf("[EXIT] Called with status=%d, thread=%s (tid=%d)\n", status, curr->name, curr->tid);
+
+    // 종료 상태 저장 (wait에서 사용)
+    curr->exit_status = status;
+
+    // 스레드 종료
+    printf("[EXIT] About to call thread_exit()\n");
+    thread_exit();
+    printf("[EXIT] After thread_exit() - THIS SHOULD NOT PRINT\n");
+}
+
+/* 검증 목록
+❌ NULL pointer
+❌ Kernel 영역 주소 (>= KERN_BASE)
+❌ 매핑 안된 주소 (page table에 없음)
+❌ Code 시작 전 영역 (< 0x400000)
+*/
 int write(int fd, const void* buffer, unsigned length)
 {
-    // char buf = 123;
-    // write (0, &buf, 1);
+    // 1. 버퍼 주소 검증
+    if (!is_valid_buffer(buffer, length))
+    {
+        exit(-1);
+    }
+
+    // 2. fd에 따라 분기.
+    // fd = 1: console출력. 2= 표준 입력. invalid. write
+    if (fd == STDOUT_FILENO)  // fd == 1 : console 출력
+    {
+        putbuf((const char*)buffer, length);
+        return length;
+    }
+    else if (fd == STDIN_FILENO)  // fd == 0 : 표준 입력
+    {
+        // 입력이니까 쓸 수 없음
+        return -1;
+    }
+    else if (fd < 0 || fd >= 128)  // 유효하지 않은 fd 범위일 경우
+    {
+        return -1;
+    }
+    else
+    {
+        // 파일 write
+        // TODO: 파일 디스크립터 테이블에서 file 가져온다
+        // TODO: file_write()
+        return -1;
+    }
+}
+
+bool is_valid_buffer(const void* buffer, unsigned length)
+{
+    const uint8_t* ptr = (const uint8_t*)buffer;
+
+    // 버퍼 시작부터 끝까지 전부 체크
+    for (unsigned i = 0; i < length; i++)
+    {
+        if (ptr + i == NULL || !is_user_vaddr(ptr + i) || (thread_current()->pml4, buffer) == NULL)
+        {
+            return false;
+        }
+    }
+    return true;
 }
 
 int filesize(int fd) {}

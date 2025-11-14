@@ -534,6 +534,7 @@ static void init_thread(struct thread* t, const char* name, int priority)
     t->original_priority = priority;
     t->magic = THREAD_MAGIC;
     t->waiting_lock = NULL;
+    t->exit_status = 0;
     list_init(&t->holding_locks);
 }
 

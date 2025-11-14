@@ -259,7 +259,7 @@ static void run_task(char** argv)
 static void run_actions(char** argv)
 {
     // ⭐ 디버깅용 코드 : ["run", "args-single onearg", NULL]
-    printf("[DEBUG] run_actions CALLED\n");
+    printf("[run_actions] run_actions CALLED\n");
 
     // 모든 argv 출력
     for (int i = 0; argv[i] != NULL; i++)
