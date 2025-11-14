@@ -17,10 +17,14 @@
 #include "threads/thread.h"
 #include "threads/mmu.h"
 #include "threads/vaddr.h"
+#include "threads/synch.h"  // 세마포어 사용을 위해 추가
 #include "intrinsic.h"
 #ifdef VM
 #include "vm/vm.h"
 #endif
+
+// 임시 세마포어 (프로세스 대기용)
+static struct semaphore temporary;
 
 // 정적 함수 선언들
 static void process_cleanup(void);                                // 프로세스 정리 함수
@@ -33,6 +37,8 @@ static void __do_fork(void*);     // fork 실행 함수
 static void process_init(void)
 {
     struct thread* current = thread_current();  // 현재 실행 중인 스레드 가져오기
+    // 임시 세마포어 초기화
+    sema_init(&temporary, 0);
     // 현재는 빈 함수로, 추후 프로세스 초기화 로직이 추가될 예정
 }
 
@@ -214,8 +220,8 @@ int process_exec(void* f_name)
      * 이는 현재 스레드가 재스케줄링될 때 실행 정보를 멤버에 저장하기 때문입니다. */
     struct intr_frame _if;  // 로컬 인터럽트 프레임 생성
     _if.ds = _if.es = _if.ss =
-        SEL_UDSEG;                    // 데이터, 확장, 스택 세그먼트를 사용자 데이터 세그먼트로 설정
-    _if.cs = SEL_UCSEG;               // 코드 세그먼트를 사용자 코드 세그먼트로 설정
+        SEL_UDSEG;  // 데이터, 확장, 스택 세그먼트를 사용자 데이터 세그먼트로 설정
+    _if.cs = SEL_UCSEG;  // 코드 세그먼트를 사용자 코드 세그먼트로 설정
     _if.eflags = FLAG_IF | FLAG_MBS;  // 인터럽트 플래그와 멀티부트 플래그 설정
 
     /* We first kill the current context */
@@ -261,7 +267,10 @@ int process_wait(tid_t child_tid UNUSED)
      * XXX:       implementing the process_wait. */
     /* XXX: 힌트) process_wait(initd)를 호출하면 pintos가 종료되므로,
      * XXX:       process_wait를 구현하기 전에 여기에 무한 루프를 추가하는 것을 권장합니다. */
-    return -1;  // 현재는 항상 -1 반환 (미구현)
+
+    /* 임시 구현: 짧은 대기 후 종료 (테스트용) */
+    sema_down(&temporary);  // 임시 세마포어로 대기
+    return -1;              // 현재는 항상 -1 반환 (미구현)
 }
 
 /* Exit the process. This function is called by thread_exit (). */
@@ -276,6 +285,12 @@ void process_exit(void)
     /* TODO: 여기에 코드를 작성하세요.
      * TODO: 프로세스 종료 메시지를 구현하세요 (project2/process_termination.html 참조).
      * TODO: 여기에 프로세스 리소스 정리를 구현하는 것을 권장합니다. */
+
+    /* 임시 구현: 종료 메시지 출력 */
+    printf("%s: exit(%d)\n", curr->name, 0);
+
+    /* 대기 중인 부모 프로세스 깨우기 */
+    sema_up(&temporary);
 
     process_cleanup();  // 프로세스 리소스 정리
 }
@@ -391,8 +406,8 @@ struct ELF64_PHDR
 #define Phdr ELF64_PHDR  // 프로그램 헤더 타입 약어
 
 // 정적 함수 선언들
-static bool setup_stack(struct intr_frame* if_);                        // 스택 설정 함수
-static bool validate_segment(const struct Phdr*, struct file*);         // 세그먼트 유효성 검사 함수
+static bool setup_stack(struct intr_frame* if_);                 // 스택 설정 함수
+static bool validate_segment(const struct Phdr*, struct file*);  // 세그먼트 유효성 검사 함수
 static bool load_segment(struct file* file, off_t ofs, uint8_t* upage,  // 세그먼트 로드 함수
                          uint32_t read_bytes, uint32_t zero_bytes, bool writable);
 
@@ -413,6 +428,16 @@ static bool load(const char* file_name, struct intr_frame* if_)
     bool success = false;                 // 성공 여부 플래그
     int i;                                // 반복문 인덱스
 
+    char* argv[LOADER_ARGS_LEN];
+    int argc = 0;  // 초기화!
+    char *token, *save_ptr;
+
+    for (token = strtok_r((char*)file_name, " ", &save_ptr); token != NULL;
+         token = strtok_r(NULL, " ", &save_ptr))
+    {
+        argv[argc++] = token;
+    }
+
     /* Allocate and activate page directory. */
     /* 페이지 디렉토리를 할당하고 활성화합니다. */
     t->pml4 = pml4_create();             // 새 페이지 테이블 생성
@@ -422,11 +447,11 @@ static bool load(const char* file_name, struct intr_frame* if_)
 
     /* Open executable file. */
     /* 실행 파일을 엽니다. */
-    file = filesys_open(file_name);  // 파일 시스템에서 파일 열기
+    file = filesys_open(argv[0]);  // 파일 시스템에서 파일 열기
     if (file == NULL)
-    {                                                  // 파일 열기 실패 시
-        printf("load: %s: open failed\n", file_name);  // 에러 메시지 출력
-        goto done;                                     // 종료 처리로 이동
+    {                                                // 파일 열기 실패 시
+        printf("load: %s: open failed\n", argv[0]);  // 에러 메시지 출력
+        goto done;                                   // 종료 처리로 이동
     }
 
     /* Read and verify executable header. */
@@ -434,9 +459,9 @@ static bool load(const char* file_name, struct intr_frame* if_)
     if (file_read(file, &ehdr, sizeof ehdr) != sizeof ehdr  // ELF 헤더 읽기 실패
         || memcmp(ehdr.e_ident, "\177ELF\2\1\1", 7)         // ELF 매직 넘버 확인 실패
         || ehdr.e_type != 2                                 // 실행 파일 타입이 아님
-        || ehdr.e_machine != 0x3E                           // amd64  // amd64 아키텍처가 아님
-        || ehdr.e_version != 1                              // ELF 버전이 1이 아님
-        || ehdr.e_phentsize != sizeof(struct Phdr)          // 프로그램 헤더 크기 불일치
+        || ehdr.e_machine != 0x3E                   // amd64  // amd64 아키텍처가 아님
+        || ehdr.e_version != 1                      // ELF 버전이 1이 아님
+        || ehdr.e_phentsize != sizeof(struct Phdr)  // 프로그램 헤더 크기 불일치
         || ehdr.e_phnum > 1024)
     {  // 프로그램 헤더 개수가 너무 많음
         printf("load: %s: error loading executable\n", file_name);  // 에러 메시지 출력
@@ -452,11 +477,11 @@ static bool load(const char* file_name, struct intr_frame* if_)
 
         if (file_ofs < 0 || file_ofs > file_length(file))  // 오프셋이 파일 범위를 벗어남
             goto done;                                     // 종료 처리로 이동
-        file_seek(file, file_ofs);                         // 파일 포인터를 해당 오프셋으로 이동
+        file_seek(file, file_ofs);  // 파일 포인터를 해당 오프셋으로 이동
 
         if (file_read(file, &phdr, sizeof phdr) != sizeof phdr)  // 프로그램 헤더 읽기 실패
             goto done;                                           // 종료 처리로 이동
-        file_ofs += sizeof phdr;                                 // 다음 프로그램 헤더로 오프셋 이동
+        file_ofs += sizeof phdr;  // 다음 프로그램 헤더로 오프셋 이동
         switch (phdr.p_type)
         {                   // 세그먼트 타입에 따라 분기
             case PT_NULL:   // NULL 타입
@@ -521,10 +546,106 @@ static bool load(const char* file_name, struct intr_frame* if_)
     /* 시작 주소. */
     if_->rip = ehdr.e_entry;  // 인터럽트 프레임의 RIP에 ELF 진입점 주소 설정
 
-    /* TODO: Your code goes here.
-     * TODO: Implement argument passing (see project2/argument_passing.html). */
-    /* TODO: 여기에 코드를 작성하세요.
-     * TODO: 인자 전달을 구현하세요 (project2/argument_passing.html 참조). */
+    /* ========== 인자를 스택에 배치 ========== */
+    /*
+     * 최종 스택 레이아웃 (주소가 낮아지는 방향):
+     *
+     * USER_STACK (0x47480000)
+     *    |
+     *    v (스택 아래로 자람)
+     * +----------------------+
+     * | "args-single\0"      | ← argv[0]이 가리키는 문자열
+     * +----------------------+
+     * | "onearg\0"           | ← argv[1]이 가리키는 문자열
+     * +----------------------+
+     * | padding (8바이트 정렬)| ← 0~7바이트 패딩
+     * +----------------------+
+     * | 0 (NULL)             | ← argv[argc] = NULL (8바이트)
+     * +----------------------+
+     * | &"onearg"            | ← argv[1] 포인터 (8바이트)
+     * +----------------------+
+     * | &"args-single"       | ← argv[0] 포인터 (8바이트) ← RSI가 가리킴
+     * +----------------------+
+     * | 0 (fake ret addr)    | ← 가짜 리턴 주소 (8바이트) ← RSP가 가리킴
+     * +----------------------+
+     *
+     * 레지스터:
+     * RDI = 2 (argc)
+     * RSI = argv 배열의 주소 (argv[0]의 주소)
+     */
+
+    // 스택 포인터 (현재 USER_STACK을 가리킴)
+    uintptr_t rsp = if_->rsp;
+
+    // 1. 각 인자 문자열을 스택에 배치 (역순으로)
+    // 왜 역순? argv[0]이 낮은 주소에 있어야 하므로, 나중에 push한 것이 먼저 나옴
+    uintptr_t argv_addrs[128];  // 각 문자열의 실제 주소를 저장할 배열
+
+    for (i = argc - 1; i >= 0; i--)  // argc-1부터 0까지 역순
+    {
+        size_t len = strlen(argv[i]) + 1;  // 문자열 길이 + null terminator
+        rsp -= len;                        // 스택 포인터를 문자열 크기만큼 내림
+        memcpy((void*)rsp, argv[i], len);  // 문자열을 스택에 복사
+        argv_addrs[i] = rsp;               // 이 문자열의 주소를 저장
+    }
+    // 예: argc=2, argv[0]="args-single", argv[1]="onearg"
+    //     먼저 argv[1] "onearg\0"를 스택에 push
+    //     그 다음 argv[0] "args-single\0"를 스택에 push
+
+    // 2. 8바이트 정렬 (word-align)
+    // x86-64 ABI 요구사항: 스택은 8바이트 경계에 정렬되어야 함
+    // 예: rsp가 0x47479ff3이면 → 0x47479ff0으로 내림 (하위 3비트를 0으로)
+    rsp = rsp & ~0x7;  // 비트 AND 연산으로 8의 배수로 내림
+    // ~0x7 = 0xFFFFFFFFFFFFFFF8 (마지막 3비트가 0)
+
+    // 3. argv[argc] = NULL 배치
+    // C 표준: argv 배열은 NULL 포인터로 끝나야 함
+    rsp -= sizeof(char*);  // 포인터 크기(8바이트)만큼 스택 내림
+    *(char**)rsp = NULL;   // NULL 포인터 저장
+
+    // 4. argv 배열 (포인터들) 배치 (역순으로)
+    // argv[argc-1], argv[argc-2], ..., argv[0] 순서로 push
+    for (i = argc - 1; i >= 0; i--)
+    {
+        rsp -= sizeof(char*);              // 포인터 크기만큼 스택 내림
+        *(uintptr_t*)rsp = argv_addrs[i];  // 문자열 주소를 스택에 저장
+    }
+    // 예: 먼저 argv[1]의 주소를 push, 그 다음 argv[0]의 주소를 push
+    // 결과: 스택에서 위에서 아래로 argv[0], argv[1], ... 순서로 배치됨
+
+    // 5. argv 배열의 시작 주소 저장
+    // RSI 레지스터에 전달할 값 (argv[0]의 주소를 가리키는 포인터)
+    uintptr_t argv_addr = rsp;
+
+    // 6. fake return address 배치
+    // 함수 호출 규약: 스택에는 리턴 주소가 있어야 함
+    // main()은 실제로 return하지 않지만, 구조상 필요
+    rsp -= sizeof(void*);  // 포인터 크기만큼 스택 내림
+    *(void**)rsp = NULL;   // NULL을 리턴 주소로 (실제로는 사용 안 됨)
+
+    // 7. 레지스터 설정
+    // x86-64 호출 규약: 첫 6개 인자는 레지스터로 전달
+    // 1번째 인자 → RDI, 2번째 인자 → RSI, 3번째 → RDX, ...
+    if_->R.rdi = argc;       // 첫 번째 인자: argc (인자 개수)
+    if_->R.rsi = argv_addr;  // 두 번째 인자: argv (인자 배열의 주소)
+    if_->rsp = rsp;          // 스택 포인터를 최종 위치로 업데이트
+
+    /*
+     * 최종 결과:
+     * - 사용자 프로그램의 main(argc, argv)가 호출될 때
+     * - RDI = 2 (argc)
+     * - RSI = argv 배열 주소 (argv[0], argv[1], NULL을 가리키는 포인터 배열)
+     * - RSP = 스택의 최하단 (fake return address)
+     *
+     * 사용자 프로그램은 다음과 같이 인자를 받음:
+     * int main(int argc, char *argv[])
+     * {
+     *     // argc = 2
+     *     // argv[0] = "args-single"
+     *     // argv[1] = "onearg"
+     *     // argv[2] = NULL
+     * }
+     */
 
     success = true;  // 성공 플래그 설정
 
@@ -633,7 +754,7 @@ static bool load_segment(struct file* file, off_t ofs, uint8_t* upage, uint32_t 
                          uint32_t zero_bytes, bool writable)
 {
     ASSERT((read_bytes + zero_bytes) % PGSIZE ==
-           0);                   // 읽기 바이트와 0 바이트의 합이 페이지 크기의 배수인지 확인
+           0);  // 읽기 바이트와 0 바이트의 합이 페이지 크기의 배수인지 확인
     ASSERT(pg_ofs(upage) == 0);  // 가상 주소가 페이지 정렬되어 있는지 확인
     ASSERT(ofs % PGSIZE == 0);   // 파일 오프셋이 페이지 크기의 배수인지 확인
 
@@ -697,9 +818,9 @@ static bool setup_stack(struct intr_frame* if_)
         success = install_page(((uint8_t*)USER_STACK) - PGSIZE, kpage,
                                true);  // 스택 하단에 페이지 설치 (쓰기 가능)
         if (success)                   // 설치 성공 시
-            if_->rsp = USER_STACK;     // 인터럽트 프레임의 스택 포인터를 USER_STACK으로 설정
-        else                           // 설치 실패 시
-            palloc_free_page(kpage);   // 할당했던 페이지 해제
+            if_->rsp = USER_STACK;  // 인터럽트 프레임의 스택 포인터를 USER_STACK으로 설정
+        else                        // 설치 실패 시
+            palloc_free_page(kpage);  // 할당했던 페이지 해제
     }
     return success;  // 성공 여부 반환
 }
@@ -728,7 +849,7 @@ static bool install_page(void* upage, void* kpage, bool writable)
      * address, then map our page there. */
     /* 해당 가상 주소에 이미 페이지가 없는지 확인한 다음,
      * 그곳에 페이지를 매핑합니다. */
-    return (pml4_get_page(t->pml4, upage) == NULL                // 해당 가상 주소에 페이지가 없고
+    return (pml4_get_page(t->pml4, upage) == NULL  // 해당 가상 주소에 페이지가 없고
             && pml4_set_page(t->pml4, upage, kpage, writable));  // 페이지 테이블에 매핑 성공
 }
 #else
@@ -777,7 +898,7 @@ static bool load_segment(struct file* file, off_t ofs, uint8_t* upage, uint32_t 
                          uint32_t zero_bytes, bool writable)
 {
     ASSERT((read_bytes + zero_bytes) % PGSIZE ==
-           0);                   // 읽기 바이트와 0 바이트의 합이 페이지 크기의 배수인지 확인
+           0);  // 읽기 바이트와 0 바이트의 합이 페이지 크기의 배수인지 확인
     ASSERT(pg_ofs(upage) == 0);  // 가상 주소가 페이지 정렬되어 있는지 확인
     ASSERT(ofs % PGSIZE == 0);   // 파일 오프셋이 페이지 크기의 배수인지 확인
 

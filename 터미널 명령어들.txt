@@ -20,6 +20,14 @@ for t in mlfqs-{load-1,load-60,load-avg,recent-1,fair-2,fair-20,nice-2,nice-10,b
 
 
 
+그럼 load에 ./dwdw ff f ff  ff   이러게 file_name이게 들어오면 이걸 일단 최고 값은 
+argv[128] 에 strtok_r이걸로 나눔 그리고 filesys_open여기서 file_name이게 필요하니
+file_name이거를argv[0] 으로 설정 그리고 나머지를 setup_stack한다음 밑에 그냥 쌓으면됨
+아니면 정해진 위치가 있는 거임?@Project2: User Programs.txt 이게 요구 사항이니 참고해서 답해봐
+
+
+
+
 ├── LICENSE
 ├── Make.config
 ├── Makefile
