@@ -2,13 +2,22 @@
 
 
 
-cd .. && make clean && make && cd build 
+clear && cd .. && make clean && make && cd build 
 
 for t in alarm-{single,multiple,simultaneous,priority,zero,negative}; do make tests/threads/$t.result; done
 
 for t in priority-{change,donate-one,donate-multiple,donate-multiple2,donate-nest,donate-sema,donate-lower,fifo,preempt,sema,condvar,donate-chain}; do make tests/threads/$t.result; done
 
 for t in mlfqs-{load-1,load-60,load-avg,recent-1,fair-2,fair-20,nice-2,nice-10,block}; do make tests/threads/mlfqs/$t.result; done
+
+# UserProg - Argument Passing
+for t in args-{none,single,multiple,many,dbl-space}; do make tests/userprog/$t.result; done
+
+# UserProg - Syscall Basics (halt/exit/create/open/close/read/write)
+for t in halt exit create-{normal,empty,null,bad-ptr,long,exists,bound} open-{normal,missing,boundary,empty,null,bad-ptr,twice} close-{normal,twice,bad-fd} read-{normal,bad-ptr,boundary,zero,stdout,bad-fd} write-{normal,bad-ptr,boundary,zero,stdin,bad-fd}; do make tests/userprog/$t.result; done
+
+# UserProg - Process Control (exec/fork/wait/child)
+for t in exec-{once,arg,boundary,missing,bad-ptr,read} fork-{once,multiple,recursive,read,close,boundary} wait-{simple,twice,killed,bad-pid} child-{simple,args,bad,close,rox,read}; do make tests/userprog/$t.result; done
 
 
 

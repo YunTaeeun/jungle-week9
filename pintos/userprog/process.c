@@ -36,9 +36,6 @@ static void __do_fork(void*);     // fork 실행 함수
 /* initd 및 다른 프로세스를 위한 일반 프로세스 초기화 함수 */
 static void process_init(void)
 {
-    struct thread* current = thread_current();  // 현재 실행 중인 스레드 가져오기
-    // 임시 세마포어 초기화
-    sema_init(&temporary, 0);
     // 현재는 빈 함수로, 추후 프로세스 초기화 로직이 추가될 예정
 }
 
@@ -53,6 +50,14 @@ static void process_init(void)
  * 주의: 이 함수는 한 번만 호출되어야 합니다. */
 tid_t process_create_initd(const char* file_name)
 {
+    /* 임시 세마포어 초기화 (process_wait보다 먼저 호출됨) */
+    static bool sema_initialized = false;
+    if (!sema_initialized)
+    {
+        sema_init(&temporary, 0);
+        sema_initialized = true;
+    }
+
     char* fn_copy;  // 파일 이름 복사본을 저장할 포인터
     tid_t tid;      // 생성된 스레드의 ID
 
@@ -67,10 +72,16 @@ tid_t process_create_initd(const char* file_name)
 
     /* Create a new thread to execute FILE_NAME. */
     /* FILE_NAME을 실행할 새 스레드를 생성합니다. */
-    tid = thread_create(file_name, PRI_DEFAULT, initd, fn_copy);  // 새 스레드 생성
-    if (tid == TID_ERROR)                                         // 스레드 생성 실패 시
-        palloc_free_page(fn_copy);                                // 할당했던 페이지 해제
-    return tid;                                                   // 생성된 스레드 ID 반환
+    char thread_name[16];
+    strlcpy(thread_name, fn_copy, sizeof thread_name);
+    char* space = strchr(thread_name, ' ');
+    if (space != NULL) *space = '\0';
+
+    tid = thread_create(thread_name, PRI_DEFAULT, initd,
+                        fn_copy);   // 새 스레드 생성
+    if (tid == TID_ERROR)           // 스레드 생성 실패 시
+        palloc_free_page(fn_copy);  // 할당했던 페이지 해제
+    return tid;                     // 생성된 스레드 ID 반환
 }
 
 /* A thread function that launches first user process. */
@@ -81,8 +92,7 @@ static void initd(void* f_name)
     supplemental_page_table_init(&thread_current()->spt);  // VM 모드일 때 보조 페이지 테이블 초기화
 #endif
 
-    process_init();  // 프로세스 초기화
-
+    process_init();                       // 프로세스 초기화
     if (process_exec(f_name) < 0)         // 프로세스 실행 시도, 실패 시
         PANIC("Fail to launch initd\n");  // 패닉 발생
     NOT_REACHED();                        // 이 지점에 도달하면 안 됨
@@ -277,7 +287,6 @@ int process_wait(tid_t child_tid UNUSED)
 /* 프로세스를 종료합니다. 이 함수는 thread_exit()에 의해 호출됩니다. */
 void process_exit(void)
 {
-    struct thread* curr = thread_current();  // 현재 스레드 가져오기
     /* TODO: Your code goes here.
      * TODO: Implement process termination message (see
      * TODO: project2/process_termination.html).
@@ -285,9 +294,6 @@ void process_exit(void)
     /* TODO: 여기에 코드를 작성하세요.
      * TODO: 프로세스 종료 메시지를 구현하세요 (project2/process_termination.html 참조).
      * TODO: 여기에 프로세스 리소스 정리를 구현하는 것을 권장합니다. */
-
-    /* 임시 구현: 종료 메시지 출력 */
-    printf("%s: exit(%d)\n", curr->name, 0);
 
     /* 대기 중인 부모 프로세스 깨우기 */
     sema_up(&temporary);
@@ -428,15 +434,24 @@ static bool load(const char* file_name, struct intr_frame* if_)
     bool success = false;                 // 성공 여부 플래그
     int i;                                // 반복문 인덱스
 
-    char* argv[LOADER_ARGS_LEN];
-    int argc = 0;  // 초기화!
+    /* 인자 파싱을 위한 변수들 */
+    char fn_copy[LOADER_ARGS_LEN];  // file_name 복사본 (strtok_r이 문자열을 수정하므로)
+    char* argv[128];                // 인자 포인터 배열
+    int argc = 0;                   // 인자 개수
     char *token, *save_ptr;
 
-    for (token = strtok_r((char*)file_name, " ", &save_ptr); token != NULL;
+    /* file_name을 복사 (strtok_r이 원본을 수정하므로) */
+    strlcpy(fn_copy, file_name, LOADER_ARGS_LEN);
+
+    /* 공백으로 인자 파싱 */
+    for (token = strtok_r(fn_copy, " ", &save_ptr); token != NULL;
          token = strtok_r(NULL, " ", &save_ptr))
     {
         argv[argc++] = token;
     }
+
+    /* 최소한 실행 파일 이름은 있어야 함 */
+    if (argc == 0) goto done;
 
     /* Allocate and activate page directory. */
     /* 페이지 디렉토리를 할당하고 활성화합니다. */
