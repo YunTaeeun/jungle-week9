@@ -402,13 +402,6 @@ arg_load_stack(char *cmdline, struct intr_frame *if_) {
  * 
  * file_name: 실행할 유저 프로그램의 파일 이름
  * if_:       유저 프로그램이 시작될 때의 레지스터 상태를 저장하는 intr_frame
- * 
- * 이 함수는 다음 단계를 수행한다:
- * 1. 새로운 페이지 테이블(pml4)을 만들고 활성화
- * 2. 파일 시스템에서 실행 파일을 열고 ELF 헤더 검증
- * 3. 프로그램 헤더를 읽으며 메모리에 코드/데이터 세그먼트를 적재
- * 4. 유저 스택을 설정 (setup_stack)
- * 5. 진입점(e_entry)을 설정하여 CPU가 해당 주소부터 실행하도록 함
  */
 static bool
 load (const char *file_name, struct intr_frame *if_) {
