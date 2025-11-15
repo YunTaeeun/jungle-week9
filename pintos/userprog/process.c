@@ -522,7 +522,7 @@ load (const char *file_name, struct intr_frame *if_) {
 
 	/* TODO: 인자 전달 구현 (argument passing) */
 	// - 프로젝트 2에서 argv, argc 스택에 적재하는 부분 구현 예정
-	success = (file_name, if_);
+	success = arg_load_stack(file_name, if_);
 
 	//success = true;
 
