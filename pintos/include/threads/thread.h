@@ -5,6 +5,7 @@
 #include <list.h>
 #include <stdint.h>
 #include "threads/interrupt.h"
+#include "threads/synch.h"
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -138,13 +139,18 @@ struct thread {
 	struct lock *waiting_lock;			// 내가 기다리는 락
 
 	int nice;							// Nice 값 (-20 ~ 20)
-    int recent_cpu;                     // 최근 CPU 사용량 (고정소수점) (17.14)
+  int recent_cpu;                     // 최근 CPU 사용량 (고정소수점) (17.14)
 
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem;              /* List element. */
 	                                    /* 리스트 원소(실행 큐 혹은 대기 큐에서 사용). */
 	int64_t wakeup_tick;                /* Wakeup tick. */
 	                                    /* 깨어날 시각(틱). */
+	// 10주차 부모, 자식쓰레드 wait 
+	int exit_status; // 자식이 종료될때 상태 저장
+	struct semaphore wait_sema; // 자식이 종료될 떄 부모를 꺠우기 위한 개인 세마포어 
+	struct list child_list; // 부모가 가질 자식들의 리스트
+	struct list_elem child_elem; // 자식이 부모의 리스트에 연결할때 쓸 elem
 
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
