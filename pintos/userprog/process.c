@@ -341,8 +341,11 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
 		bool writable);
 
 // 로드 함수에서 file_name (cmd_line) 넘기면 스택에 밀어넣는 부분
-void
+bool
 arg_load_stack(char *cmdline, struct intr_frame *if_) {
+	// 성공 실패 반환
+	bool success = false;
+
 	char *token, *save_ptr;
 	int argc = 0;
 	char *argv[64]; // 최대 64개의 인자를 처리한다고 가정
@@ -384,6 +387,9 @@ arg_load_stack(char *cmdline, struct intr_frame *if_) {
 	// 6. 가짜 반환 주소 Push
 	if_->rsp -= 8;
 	memset((void *)if_->rsp, 0, sizeof(void *));
+
+	success = true;
+	return success;
  }
 
 
@@ -391,11 +397,18 @@ arg_load_stack(char *cmdline, struct intr_frame *if_) {
  * Stores the executable's entry point into *RIP
  * and its initial stack pointer into *RSP.
  * Returns true if successful, false otherwise. */
-// 유저가 실행을 요청한 프로그램을 하드 디스크에서 찾아서 메모리에 적쟤(load) 하는 단계
+// 유저가 실행을 요청한 프로그램을 하드 디스크에서 찾아서 메모리에 적재(load) 하는 단계
 /* Loads an ELF executable from the file system into the current process's memory.
  * 
  * file_name: 실행할 유저 프로그램의 파일 이름
  * if_:       유저 프로그램이 시작될 때의 레지스터 상태를 저장하는 intr_frame
+ * 
+ * 이 함수는 다음 단계를 수행한다:
+ * 1. 새로운 페이지 테이블(pml4)을 만들고 활성화
+ * 2. 파일 시스템에서 실행 파일을 열고 ELF 헤더 검증
+ * 3. 프로그램 헤더를 읽으며 메모리에 코드/데이터 세그먼트를 적재
+ * 4. 유저 스택을 설정 (setup_stack)
+ * 5. 진입점(e_entry)을 설정하여 CPU가 해당 주소부터 실행하도록 함
  */
 static bool
 load (const char *file_name, struct intr_frame *if_) {
@@ -516,9 +529,9 @@ load (const char *file_name, struct intr_frame *if_) {
 
 	/* TODO: 인자 전달 구현 (argument passing) */
 	// - 프로젝트 2에서 argv, argc 스택에 적재하는 부분 구현 예정
-	arg_load_stack(file_name, if_);
+	success = (file_name, if_);
 
-	success = true;
+	//success = true;
 
 done:
 	/* 성공/실패 여부와 관계없이 파일 닫기 */
