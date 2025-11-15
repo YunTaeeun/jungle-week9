@@ -5,6 +5,7 @@
 #include <list.h>
 #include <stdint.h>
 #include "threads/interrupt.h"
+#include "threads/synch.h"  // struct semaphore를 위해 필요
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -28,8 +29,8 @@ enum thread_status
 /* 스레드 식별자 타입입니다.
    필요하다면 원하는 타입으로 재정의할 수 있습니다. */
 typedef int tid_t;
-#define TID_ERROR ((tid_t) - 1) /* Error value for tid_t. */
-                                /* tid_t를 위한 에러 값. */
+#define TID_ERROR ((tid_t)-1) /* Error value for tid_t. */
+                              /* tid_t를 위한 에러 값. */
 
 /* Thread priorities. */
 /* 스레드 우선순위 값들. */
@@ -39,6 +40,8 @@ typedef int tid_t;
                        /* 기본 우선순위. */
 #define PRI_MAX 63     /* Highest priority. */
                        /* 가장 높은 우선순위. */
+
+#define MAX_FD 128  // 파일 디스크립터를 위한 값
 
 /* A kernel thread or user process.
  *
@@ -137,6 +140,19 @@ struct thread
     int original_priority;      // 처음 부여 받는 우선순위
     struct list holding_locks;  // 내가 보유한 락 리스트
     struct lock* waiting_lock;  // 내가 기다리는 락
+
+    // 프로세스 관리
+    int exit_status;  // [EXIT] 종료 상태 코드 (sys_exit()에서 설정, process_exit()에서 출력)
+    struct semaphore wait_sema;  // [WAIT] 부모가 wait() 호출 시 대기하는 세마포어
+    struct semaphore exit_sema;  // [EXIT] 자식이 exit()할 때 부모를 깨우는 세마포어
+    struct list children;  // [FORK] 자식 프로세스 리스트 (부모가 자식들을 추적)
+    struct list_elem child_elem;  // [FORK] 부모의 children 리스트에 자신을 등록하기 위한 원소
+    struct thread* parent;  // [FORK] 부모 프로세스 포인터 (자식이 부모를 찾기 위해)
+    bool waited;            // [WAIT] 이미 wait()되었는지 여부 (중복 wait 방지)
+
+    // 파일 관리
+    struct file* fds[MAX_FD];  // 파일 디스크립터
+    struct file* exec_file;    // 실행 중인 파일 (deny write용)
 
     int nice;        // Nice 값 (-20 ~ 20)
     int recent_cpu;  // 최근 CPU 사용량 (고정소수점) (17.14)

@@ -23,9 +23,6 @@
 #include "vm/vm.h"
 #endif
 
-// 임시 세마포어 (프로세스 대기용)
-static struct semaphore temporary;
-
 // 정적 함수 선언들
 static void process_cleanup(void);                                // 프로세스 정리 함수
 static bool load(const char* file_name, struct intr_frame* if_);  // ELF 파일 로드 함수
@@ -50,14 +47,6 @@ static void process_init(void)
  * 주의: 이 함수는 한 번만 호출되어야 합니다. */
 tid_t process_create_initd(const char* file_name)
 {
-    /* 임시 세마포어 초기화 (process_wait보다 먼저 호출됨) */
-    static bool sema_initialized = false;
-    if (!sema_initialized)
-    {
-        sema_init(&temporary, 0);
-        sema_initialized = true;
-    }
-
     char* fn_copy;  // 파일 이름 복사본을 저장할 포인터
     tid_t tid;      // 생성된 스레드의 ID
 
@@ -204,6 +193,10 @@ static void __do_fork(void* aux)
      * TODO:       부모는 이 함수가 부모의 리소스를 성공적으로 복제할 때까지 fork()에서 반환하지
      * 않아야 합니다. */
 
+    // 부모-자식 관계 설정
+    current->parent = parent;                                 // 자식이 부모 포인터 저장
+    list_push_back(&parent->children, &current->child_elem);  // 부모의 children 리스트에 자식 추가
+
     process_init();  // 프로세스 초기화
 
     /* Finally, switch to the newly created process. */
@@ -270,17 +263,38 @@ int process_exec(void* f_name)
  * 대기하지 않고 즉시 -1을 반환합니다.
  *
  * 이 함수는 문제 2-2에서 구현될 예정입니다. 현재는 아무것도 하지 않습니다. */
-int process_wait(tid_t child_tid UNUSED)
+int process_wait(tid_t child_tid)
 {
-    /* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
-     * XXX:       to add infinite loop here before
-     * XXX:       implementing the process_wait. */
-    /* XXX: 힌트) process_wait(initd)를 호출하면 pintos가 종료되므로,
-     * XXX:       process_wait를 구현하기 전에 여기에 무한 루프를 추가하는 것을 권장합니다. */
+    struct thread* current = thread_current();
+    struct thread* child = NULL;
+    struct list_elem* e;
 
-    /* 임시 구현: 짧은 대기 후 종료 (테스트용) */
-    sema_down(&temporary);  // 임시 세마포어로 대기
-    return -1;              // 현재는 항상 -1 반환 (미구현)
+    // children 리스트에서 해당 자식 찾기
+    for (e = list_begin(&current->children); e != list_end(&current->children); e = list_next(e))
+    {
+        struct thread* t = list_entry(e, struct thread, child_elem);
+        if (t->tid == child_tid)
+        {
+            child = t;
+            break;
+        }
+    }
+
+    // 자식을 찾지 못했거나 자신의 자식이 아니면 -1 반환
+    if (child == NULL) return -1;
+
+    // 이미 wait된 자식이면 -1 반환
+    if (child->waited) return -1;
+
+    // 자식이 종료될 때까지 대기
+    child->waited = true;  // wait 플래그 설정
+    sema_down(&child->exit_sema);
+
+    // 자식의 종료 상태 반환
+    int exit_status = child->exit_status;
+    list_remove(&child->child_elem);  // children 리스트에서 제거
+
+    return exit_status;
 }
 
 /* Exit the process. This function is called by thread_exit (). */
@@ -295,8 +309,36 @@ void process_exit(void)
      * TODO: 프로세스 종료 메시지를 구현하세요 (project2/process_termination.html 참조).
      * TODO: 여기에 프로세스 리소스 정리를 구현하는 것을 권장합니다. */
 
-    /* 대기 중인 부모 프로세스 깨우기 */
-    sema_up(&temporary);
+    struct thread* t = thread_current();
+
+    // 파일 디스크립터 정리
+    // 모든 열린 파일 닫기
+    for (int i = 2; i < MAX_FD; i++)
+    {
+        if (t->fds[i] != NULL)
+        {
+            file_close(t->fds[i]);
+            t->fds[i] = NULL;
+        }
+    }
+
+    // 실행 파일에 대한 쓰기 허용
+    if (t->exec_file != NULL)
+    {
+        file_allow_write(t->exec_file);
+        file_close(t->exec_file);
+        t->exec_file = NULL;
+    }
+
+    // 종료 상태 출력
+    // sys_exit()을 통해 종료된 경우 이미 출력되었지만,
+    // 예외로 종료된 경우(잘못된 메모리 접근 등)를 위해 여기서도 출력
+    // exit_status가 0이면 sys_exit(0)을 통해 정상 종료된 것이므로 이미 출력됨
+    // 하지만 예외로 종료된 경우 exit_status가 -1이거나 다른 값일 수 있음
+    printf("%s: exit(%d)\n", t->name, t->exit_status);
+
+    // 대기 중인 부모 프로세스 깨우기
+    sema_up(&t->exit_sema);
 
     process_cleanup();  // 프로세스 리소스 정리
 }
