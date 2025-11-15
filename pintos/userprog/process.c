@@ -76,7 +76,7 @@ process_create_initd (const char *file_name) {
 /* 첫 번째 사용자 프로세스를 실행하는 스레드 함수입니다. */
 static void initd(void* f_name)
 {
-    printf("[INITD] Started, f_name='%s'\n", (char*)f_name);
+    // printf("[INITD] Started, f_name='%s'\n", (char*)f_name);
 
 #ifdef VM
     supplemental_page_table_init(&thread_current()->spt);
@@ -175,8 +175,7 @@ error:
 /* 현재 실행 중인 프로세스(커널 스레드)를 'f_name'의 
  * 새 유저 프로그램으로 교체(transform)합니다.
  * 이 함수는 실패 시 -1을 반환하며, 성공 시 리턴하지 않습니다. */
-int
-process_exec (void *f_name) {
+int process_exec (void *f_name) {
   // f_name은 "program_name args..." 형태의 '명령어 전체' 문자열.
   char *file_name = f_name;
   bool success;
@@ -190,6 +189,17 @@ process_exec (void *f_name) {
   /* 2. 현재 컨텍스트(메모리 공간, pml4)를 정리(파괴)하여
    * 새 유저 프로세스로 '변신'할 준비를 함. */
   process_cleanup ();
+
+    // 프로그램명만 추출 (공백 전까지)
+    char *prog_name = file_name;
+    char *space = strchr(file_name, ' ');
+    if (space) {
+        *space = '\0';
+        printf("Executing '%s':\n", prog_name);
+        *space = ' ';  // 복원
+    } else {
+        printf("Executing '%s':\n", prog_name);
+    }
 
   /* 3. load() 함수를 호출하여 새 프로그램을 메모리에 적재. */
   success = load (file_name, &_if);
@@ -438,7 +448,7 @@ load (const char *file_name, struct intr_frame *if_) {
 	/* 2️⃣ 실행 파일 열기 */
 	file = filesys_open (program_name);        // 파일 시스템에서 실행 파일 탐색 및 오픈
 	if (file == NULL) {
-		printf ("load: %s: open failed\n", program_name);
+		// printf ("load: %s: open failed\n", program_name);
 		goto done;
 	}
 
@@ -451,7 +461,7 @@ load (const char *file_name, struct intr_frame *if_) {
 			|| ehdr.e_version != 1
 			|| ehdr.e_phentsize != sizeof (struct Phdr)   // 프로그램 헤더 크기 확인
 			|| ehdr.e_phnum > 1024) {                     // 프로그램 헤더 개수 유효성
-		printf ("load: %s: error loading executable\n", program_name);
+		// printf ("load: %s: error loading executable\n", program_name);
 		goto done;
 	}
 

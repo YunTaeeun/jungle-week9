@@ -70,19 +70,19 @@ void filesys_done(void)
  * 내부 메모리 할당이 실패하면 실패한다. */
 bool filesys_create(const char* name, off_t initial_size)
 {
-    printf("[FILESYS_CREATE] Called with name='%s', size=%d\n", name, initial_size);
+    // printf("[FILESYS_CREATE] Called with name='%s', size=%d\n", name, initial_size);
 
     disk_sector_t inode_sector = 0;
     struct dir* dir = dir_open_root();
 
-    printf("[FILESYS_CREATE] dir_open_root() returned: %p\n", dir);
+    // printf("[FILESYS_CREATE] dir_open_root() returned: %p\n", dir);
     if (dir == NULL) {
         printf("[FILESYS_CREATE] FAILED: dir is NULL\n");
         return false;
     }
 
     bool alloc_success = free_map_allocate(1, &inode_sector);
-    printf("[FILESYS_CREATE] free_map_allocate() returned: %d, sector=%d\n", alloc_success, inode_sector);
+    // printf("[FILESYS_CREATE] free_map_allocate() returned: %d, sector=%d\n", alloc_success, inode_sector);
 
     if (!alloc_success) {
         printf("[FILESYS_CREATE] FAILED: free_map_allocate failed\n");
@@ -91,7 +91,7 @@ bool filesys_create(const char* name, off_t initial_size)
     }
 
     bool inode_success = inode_create(inode_sector, initial_size);
-    printf("[FILESYS_CREATE] inode_create() returned: %d\n", inode_success);
+    // printf("[FILESYS_CREATE] inode_create() returned: %d\n", inode_success);
 
     if (!inode_success) {
         printf("[FILESYS_CREATE] FAILED: inode_create failed\n");
@@ -101,7 +101,7 @@ bool filesys_create(const char* name, off_t initial_size)
     }
 
     bool dir_add_success = dir_add(dir, name, inode_sector);
-    printf("[FILESYS_CREATE] dir_add() returned: %d\n", dir_add_success);
+    // printf("[FILESYS_CREATE] dir_add() returned: %d\n", dir_add_success);
 
     if (!dir_add_success) {
         printf("[FILESYS_CREATE] FAILED: dir_add failed\n");
@@ -111,7 +111,7 @@ bool filesys_create(const char* name, off_t initial_size)
     }
 
     dir_close(dir);
-    printf("[FILESYS_CREATE] SUCCESS\n");
+    // printf("[FILESYS_CREATE] SUCCESS\n");
     return true;
 }
 

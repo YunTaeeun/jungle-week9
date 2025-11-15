@@ -535,16 +535,9 @@ static void init_thread(struct thread* t, const char* name, int priority)
     t->magic = THREAD_MAGIC;
     t->waiting_lock = NULL;
     t->exit_status = 0;
-    t->child_thread = NULL;
     list_init(&t->holding_locks);
-    sema_init(&t->wait_sema, 0);  // 0으로 초기화: 부모가 대기하도록
 }
 
-/* Chooses and returns the next thread to be scheduled.  Should
-   return a thread from the run queue, unless the run queue is
-   empty.  (If the running thread can continue running, then it
-   will be in the run queue.)  If the run queue is empty, return
-   idle_thread. */
 /* 다음에 스케줄할 스레드를 선택하여 반환합니다.
    실행 큐가 비어 있지 않다면 그 안에서 스레드를 반환해야 합니다.
    (실행 중인 스레드가 계속 실행 가능하다면 실행 큐에 존재합니다.)

@@ -45,7 +45,7 @@ void syscall_handler(struct intr_frame* f UNUSED)
 
     // RAX 레지스터에 시스템 콜 번호가 저장되어 있음
     int syscall_number = f->R.rax;
-    printf("[SYSCALL_HANDLER] syscall_number=%d\n", syscall_number);
+    // printf("[SYSCALL_HANDLER] syscall_number=%d\n", syscall_number);
 
     // 인자 가져오기
     uint64_t arg1 = f->R.rdi;
@@ -86,8 +86,8 @@ void syscall_handler(struct intr_frame* f UNUSED)
             // read 구현
             break;
         case SYS_WRITE:
-            printf("[SYSCALL_SYS_WRITE] called: fd=%d, buffer=%p, length=%u\n", (int)arg1,
-                   (void*)arg2, (unsigned)arg3);
+            // printf("[SYSCALL_SYS_WRITE] called: fd=%d, buffer=%p, length=%u\n", (int)arg1,
+                //    (void*)arg2, (unsigned)arg3);
             f->R.rax = write((int)arg1, (const void*)arg2, (unsigned)arg3);
             break;
         case SYS_SEEK:
@@ -103,8 +103,8 @@ void syscall_handler(struct intr_frame* f UNUSED)
             printf("Unknown system call: %d\n", syscall_number);
             break;
     }
-    printf("system call!\n");
-    printf("[SYSCALL_HANDLER] Finished handling syscall %d\n", syscall_number);
+    // printf("system call!\n");
+    // printf("[SYSCALL_HANDLER] Finished handling syscall %d\n", syscall_number);
 }
 
 // 시스템 종료
@@ -117,15 +117,11 @@ void halt(void)
 void exit(int status)
 {
     struct thread* curr = thread_current();
-    printf("[EXIT] Called with status=%d, thread=%s (tid=%d)\n", status, curr->name, curr->tid);
-
-    // 종료 상태 저장 (wait에서 사용)
-    curr->exit_status = status;
+    curr->exit_status = status; // 종료 상태 저장 (wait에서 사용)
 
     // 스레드 종료
-    printf("[EXIT] About to call thread_exit()\n");
+    printf("%s: exit(%d)\n", curr->name, status);  
     thread_exit();
-    printf("[EXIT] After thread_exit() - THIS SHOULD NOT PRINT\n");
 }
 
 /* 검증 목록

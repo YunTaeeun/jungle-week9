@@ -240,8 +240,8 @@ run_task (char **argv) {
 	// argv[1] -> 프로그램 이름임
 	const char *task = argv[1];
 
-    printf("[DEBUG] run_task CALLED\n");
-    printf("[run_task] argv[1]: %s\n", argv[1]);  // argv[1] = args-single onearg
+    // printf("[DEBUG] run_task CALLED\n");
+    // printf("[run_task] argv[1]: %s\n", argv[1]);  // argv[1] = args-single onearg
 
 #ifdef USERPROG
 // thread_tests 는 기본값이 False 임
@@ -255,21 +255,20 @@ run_task (char **argv) {
     run_test(task);
 #endif
 
-    printf("[run_task] Execution of '%s' complete.\n", task);
+    printf("Execution of '%s' complete.\n", task);
 }
 
 /* Executes all of the actions specified in ARGV[]
    up to the null pointer sentinel. */
 static void run_actions(char** argv)
 {
-    // ⭐ 디버깅용 코드 : ["run", "args-single onearg", NULL]
-    printf("[run_actions] run_actions CALLED\n");
+    // printf("[run_actions] run_actions CALLED\n");
 
     // 모든 argv 출력
-    for (int i = 0; argv[i] != NULL; i++)
-    {
-        printf("[run_actions] argv[%d]: %s\n", i, argv[i]);
-    }
+    // for (int i = 0; argv[i] != NULL; i++)
+    // {
+    //     printf("[run_actions] argv[%d]: %s\n", i, argv[i]);
+    // }
 
     /* An action. */
     struct action
@@ -295,7 +294,7 @@ static void run_actions(char** argv)
         const struct action* a;
         int i;
 
-        printf("[run_actions] Processing action: %s\n", *argv);
+        // printf("[run_actions] Processing action: %s\n", *argv);
 
         /* Find action name. */
         for (a = actions;; a++)
@@ -304,21 +303,21 @@ static void run_actions(char** argv)
             else if (!strcmp(*argv, a->name))
                 break;
 
-        printf("[run_actions] Found action '%s', argc=%d\n", a->name, a->argc);
+        // printf("[run_actions] Found action '%s', argc=%d\n", a->name, a->argc);
 
         /* Check for required arguments. */
         for (i = 1; i < a->argc; i++)
             if (argv[i] == NULL) PANIC("action `%s' requires %d argument(s)", *argv, a->argc - 1);
 
         /* Invoke action and advance. */
-        printf("[run_actions] Calling function for '%s'\n", a->name);
+        // printf("[run_actions] Calling function for '%s'\n", a->name);
         a->function(argv);
-        printf("[run_actions] Finished '%s', advancing by %d\n", a->name, a->argc);
+        // printf("[run_actions] Finished '%s', advancing by %d\n", a->name, a->argc);
         argv += a->argc;
     }
 
     // ⭐ 디버깅용 코드
-    printf("[run_actions] run_action END\n");
+    // printf("[run_actions] run_action END\n");
 }
 
 /* Prints a kernel command line help message and powers off the

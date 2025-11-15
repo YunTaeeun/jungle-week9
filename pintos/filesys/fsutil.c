@@ -105,16 +105,16 @@ fsutil_put (char **argv) {
 		PANIC ("%s: invalid file size %d", file_name, size);
 
 	/* Create destination file. */
-	printf("[FSUTIL_PUT] About to call filesys_create('%s', %d)\n", file_name, size);
+	// printf("[FSUTIL_PUT] About to call filesys_create('%s', %d)\n", file_name, size);
 	bool create_result = filesys_create (file_name, size);
-	printf("[FSUTIL_PUT] filesys_create returned: %d\n", create_result);
+	// printf("[FSUTIL_PUT] filesys_create returned: %d\n", create_result);
 
 	if (!create_result)
 		PANIC ("%s: create failed", file_name);
 
-	printf("[FSUTIL_PUT] About to call filesys_open('%s')\n", file_name);
+	// printf("[FSUTIL_PUT] About to call filesys_open('%s')\n", file_name);
 	dst = filesys_open (file_name);
-	printf("[FSUTIL_PUT] filesys_open returned: %p\n", dst);
+	// printf("[FSUTIL_PUT] filesys_open returned: %p\n", dst);
 
 	if (dst == NULL)
 		PANIC ("%s: open failed", file_name);
