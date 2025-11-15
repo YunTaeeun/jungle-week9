@@ -148,6 +148,7 @@ struct thread {
 
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
+	// pml4는 스레드가 아니라, 해당 스레드(프로세스)가 사용하는 '가상 메모리 주소록' 그 자체를 가리키는 포인터
 	uint64_t *pml4;                     /* Page map level 4 */
 	                                    /* 사용자 프로그램용 PML4 포인터. */
 #endif
