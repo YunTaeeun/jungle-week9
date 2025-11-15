@@ -1,3 +1,4 @@
+// pintos 메인 시작되는 곳
 #include "threads/init.h"
 #include <console.h>
 #include <debug.h>
@@ -63,6 +64,7 @@ static void print_stats(void);
 
 int main(void) NO_RETURN;
 
+// 핀토스 메인 여기 있음
 /* Pintos main program. */
 int main(void)
 {
@@ -117,8 +119,9 @@ int main(void)
 
     printf("Boot complete.\n");
 
-    /* Run actions specified on kernel command line. */
-    run_actions(argv);  // ["run", "args-single onearg", NULL]
+	/* Run actions specified on kernel command line. */
+	// 위에서 parse 까지 완료된 명령어 run_actions 함수로 넘김
+	run_actions (argv);
 
     /* Finish up. */
     if (power_off_when_done) power_off();
@@ -231,22 +234,23 @@ static char** parse_options(char** argv)
 }
 
 /* Runs the task specified in ARGV[1]. */
-static void run_task(char** argv)
-{
-    const char* task = argv[1];
+// 10주차
+static void
+run_task (char **argv) {
+	// argv[1] -> 프로그램 이름임
+	const char *task = argv[1];
 
     printf("[DEBUG] run_task CALLED\n");
     printf("[run_task] argv[1]: %s\n", argv[1]);  // argv[1] = args-single onearg
 
 #ifdef USERPROG
-    if (thread_tests)
-    {
-        run_test(task);
-    }
-    else
-    {
-        process_wait(process_create_initd(task));
-    }
+// thread_tests 는 기본값이 False 임
+	if (thread_tests){
+		run_test (task);
+	} else {
+		// 10주차 fork 시켜놓고 원래 프로그램이 죽기 전에 fork 된 프로그램이 돌아가게 원래 프로그램이 기다려야 한다
+		process_wait (process_create_initd (task));
+	}
 #else
     run_test(task);
 #endif
@@ -275,9 +279,10 @@ static void run_actions(char** argv)
         void (*function)(char** argv); /* Function to execute action. */
     };
 
-    /* Table of supported actions. */
-    static const struct action actions[] = {
-        {"run", 2, run_task},
+	/* Table of supported actions. */
+	// 1. 사용자가 입력한 명령어 argv[0]이 run이 맞는지, 2. 인자 2개 들어온거 맞는지 (argv[0]= run, argv[1]= '실행할 프로그램 문자열' -> 이 2조건이 만족되면, run_task 실행)
+	static const struct action actions[] = {
+		{"run", 2, run_task},
 #ifdef FILESYS
         {"ls", 1, fsutil_ls},   {"cat", 2, fsutil_cat}, {"rm", 2, fsutil_rm},
         {"put", 2, fsutil_put}, {"get", 2, fsutil_get},
