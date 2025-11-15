@@ -141,8 +141,6 @@ struct thread
 
     /* system call에서 사용 */
     int exit_status;  // 종료 상태
-    struct semaphore wait_sema;  // 부모가 자식을 기다리기 위한 세마포어
-    struct thread* child_thread;  // 자식 스레드 포인터 (임시, Project 2-2에서 리스트로 변경)
 
     int nice;        // Nice 값 (-20 ~ 20)
     int recent_cpu;  // 최근 CPU 사용량 (고정소수점) (17.14)

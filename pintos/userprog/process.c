@@ -24,10 +24,6 @@
 
 // process.c : ELF 바이너리를 로드하고 프로세스를 시작합니다
 
-// 임시: 자식 스레드를 전역 변수로 저장 (Project 2-2에서 제거)
-static struct thread* g_child_thread = NULL;
-static struct semaphore g_child_ready;  // 자식이 준비되었음을 알리는 세마포어
-
 static void process_cleanup(void);
 static bool load(const char* file_name, struct intr_frame* if_);
 static void initd(void* f_name);
@@ -65,9 +61,6 @@ tid_t process_create_initd(const char* file_name)
     strlcpy(fn_copy, file_name, PGSIZE);
     printf("[PROCESS_CREATE_INITD] Copied to fn_copy: '%s'\n", fn_copy);
 
-    // 임시: 자식이 준비될 때까지 기다리기 위한 세마포어 초기화 (Project 2-2에서 제거)
-    sema_init(&g_child_ready, 0);
-
     /* FILE_NAME을 실행할 새 스레드를 생성합니다. */
     printf("[PROCESS_CREATE_INITD] About to call thread_create\n");
     tid = thread_create(file_name, PRI_DEFAULT, initd, fn_copy);
@@ -81,8 +74,6 @@ tid_t process_create_initd(const char* file_name)
     else
     {
         printf("[PROCESS_CREATE_INITD] SUCCESS: created thread %d\n", tid);
-        // 임시: 자식이 준비될 때까지 대기 (Project 2-2에서 제거)
-        sema_down(&g_child_ready);
     }
 
     return tid;
@@ -92,13 +83,6 @@ tid_t process_create_initd(const char* file_name)
 static void initd(void* f_name)
 {
     printf("[INITD] Started, f_name='%s'\n", (char*)f_name);
-    printf("[INITD] Current thread: %s (tid=%d)\n", thread_current()->name, thread_current()->tid);
-
-    // 임시: 전역 변수에 자신을 저장 (Project 2-2에서 제거)
-    g_child_thread = thread_current();
-
-    // 임시: 부모에게 준비 완료 알림 (Project 2-2에서 제거)
-    sema_up(&g_child_ready);
 
 #ifdef VM
     supplemental_page_table_init(&thread_current()->spt);
@@ -242,20 +226,7 @@ int process_wait(tid_t child_tid UNUSED)
 
     // TODO: Project 2-2에서 완전한 구현 예정
     // 임시 구현: 전역 변수 사용
-    struct thread* child = g_child_thread;
-
-    if (child == NULL || child->tid != child_tid)
-    {
-        return -1;  // 자식을 찾지 못함
-    }
-
-    // 자식이 종료될 때까지 대기
-    sema_down(&child->wait_sema);
-
-    // 자식의 종료 상태 가져오기
-    int exit_status = child->exit_status;
-
-    return exit_status;
+    return -1;
 }
 
 /* 프로세스를 종료합니다. 이 함수는 thread_exit()에 의해 호출됩니다. */
@@ -265,9 +236,6 @@ void process_exit(void)
     /* TODO: 여기에 코드를 작성하세요.
      * TODO: 프로세스 종료 메시지를 구현하세요 (project2/process_termination.html 참고).
      * TODO: 여기에서 프로세스 리소스 정리를 구현하는 것을 권장합니다. */
-
-    // 부모가 대기 중이면 깨워주기
-    sema_up(&curr->wait_sema);
 
     process_cleanup();
 }
