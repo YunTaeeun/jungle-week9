@@ -103,11 +103,8 @@ void syscall_handler(struct intr_frame* f UNUSED)
             printf("Unknown system call: %d\n", syscall_number);
             break;
     }
-
-    printf("[SYSCALL_HANDLER] Finished handling syscall %d\n", syscall_number);
-    printf("[SYSCALL_HANDLER] About to call thread_exit()\n");
     printf("system call!\n");
-    thread_exit();
+    printf("[SYSCALL_HANDLER] Finished handling syscall %d\n", syscall_number);
 }
 
 // 시스템 종료
@@ -177,7 +174,8 @@ bool is_valid_buffer(const void* buffer, unsigned length)
     // 버퍼 시작부터 끝까지 전부 체크
     for (unsigned i = 0; i < length; i++)
     {
-        if (ptr + i == NULL || !is_user_vaddr(ptr + i) || (thread_current()->pml4, buffer) == NULL)
+        if (ptr + i == NULL || !is_user_vaddr(ptr + i) ||
+            pml4_get_page(thread_current()->pml4, buffer) == NULL)
         {
             return false;
         }

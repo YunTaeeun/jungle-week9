@@ -24,6 +24,10 @@
 
 // process.c : ELF 바이너리를 로드하고 프로세스를 시작합니다
 
+// 임시: 자식 스레드를 전역 변수로 저장 (Project 2-2에서 제거)
+static struct thread* g_child_thread = NULL;
+static struct semaphore g_child_ready;  // 자식이 준비되었음을 알리는 세마포어
+
 static void process_cleanup(void);
 static bool load(const char* file_name, struct intr_frame* if_);
 static void initd(void* f_name);
@@ -61,6 +65,9 @@ tid_t process_create_initd(const char* file_name)
     strlcpy(fn_copy, file_name, PGSIZE);
     printf("[PROCESS_CREATE_INITD] Copied to fn_copy: '%s'\n", fn_copy);
 
+    // 임시: 자식이 준비될 때까지 기다리기 위한 세마포어 초기화 (Project 2-2에서 제거)
+    sema_init(&g_child_ready, 0);
+
     /* FILE_NAME을 실행할 새 스레드를 생성합니다. */
     printf("[PROCESS_CREATE_INITD] About to call thread_create\n");
     tid = thread_create(file_name, PRI_DEFAULT, initd, fn_copy);
@@ -74,6 +81,8 @@ tid_t process_create_initd(const char* file_name)
     else
     {
         printf("[PROCESS_CREATE_INITD] SUCCESS: created thread %d\n", tid);
+        // 임시: 자식이 준비될 때까지 대기 (Project 2-2에서 제거)
+        sema_down(&g_child_ready);
     }
 
     return tid;
@@ -84,6 +93,12 @@ static void initd(void* f_name)
 {
     printf("[INITD] Started, f_name='%s'\n", (char*)f_name);
     printf("[INITD] Current thread: %s (tid=%d)\n", thread_current()->name, thread_current()->tid);
+
+    // 임시: 전역 변수에 자신을 저장 (Project 2-2에서 제거)
+    g_child_thread = thread_current();
+
+    // 임시: 부모에게 준비 완료 알림 (Project 2-2에서 제거)
+    sema_up(&g_child_ready);
 
 #ifdef VM
     supplemental_page_table_init(&thread_current()->spt);
@@ -222,19 +237,25 @@ int process_exec(void* f_name)
  * 이 함수는 문제 2-2에서 구현될 것입니다. 지금은 아무것도 하지 않습니다. */
 int process_wait(tid_t child_tid UNUSED)
 {
-    // printf("[PROCESS_WAIT] Called with child_tid=%d\n", child_tid);
-
     /* XXX: 힌트) process_wait (initd)를 하면 pintos가 종료됩니다.
      * XXX:       process_wait를 구현하기 전에 여기에 무한 루프를 추가하는 것을 권장합니다. */
 
-    // printf("[PROCESS_WAIT] Entering infinite loop to keep process alive...\n");
-    // CPU를 양보하면서 대기 (자식이 실행될 수 있도록)
-    for (;;)
+    // TODO: Project 2-2에서 완전한 구현 예정
+    // 임시 구현: 전역 변수 사용
+    struct thread* child = g_child_thread;
+
+    if (child == NULL || child->tid != child_tid)
     {
-        // 무한 루프: 프로세스가 종료될 때까지 대기
+        return -1;  // 자식을 찾지 못함
     }
 
-    return -1;
+    // 자식이 종료될 때까지 대기
+    sema_down(&child->wait_sema);
+
+    // 자식의 종료 상태 가져오기
+    int exit_status = child->exit_status;
+
+    return exit_status;
 }
 
 /* 프로세스를 종료합니다. 이 함수는 thread_exit()에 의해 호출됩니다. */
@@ -244,6 +265,9 @@ void process_exit(void)
     /* TODO: 여기에 코드를 작성하세요.
      * TODO: 프로세스 종료 메시지를 구현하세요 (project2/process_termination.html 참고).
      * TODO: 여기에서 프로세스 리소스 정리를 구현하는 것을 권장합니다. */
+
+    // 부모가 대기 중이면 깨워주기
+    sema_up(&curr->wait_sema);
 
     process_cleanup();
 }
@@ -345,6 +369,7 @@ static bool setup_stack(struct intr_frame* if_);
 static bool validate_segment(const struct Phdr*, struct file*);
 static bool load_segment(struct file* file, off_t ofs, uint8_t* upage, uint32_t read_bytes,
                          uint32_t zero_bytes, bool writable);
+static bool set_argument_stack(int argc, char** argv, struct intr_frame* if_);
 
 /* FILE_NAME에서 ELF 실행 파일을 현재 스레드로 로드합니다.
  * 실행 파일의 진입점을 *RIP에 저장하고
@@ -367,23 +392,24 @@ static bool load(const char* file_name, struct intr_frame* if_)
     int i;
 
     /* Week10. 파일명과 인자를 분리합니다 */
-    char file_name_only[NAME_MAX + 1];  // +1 is for \0
 
+    /* 1. 문자를 분리하기 위한 메모리 세팅 */
     /* 4096바이트(1페이지)의 메모리를 할당하고 할당된 메모리의 시작주소를 반환.
      * 핀토스는 메모리를 페이지 단위로 관리해서 최소 1페이지 해야 함.
      * 아직 아무 데이터도 없는 상태 (쓰레기값만 있다) */
     char* file_name_copy = palloc_get_page(0);
-
     if (file_name_copy == NULL) goto done;
 
+    char file_name_only[NAME_MAX + 1];  // 파일 이름을 담을 변수
     strlcpy(file_name_copy, file_name,
-            PGSIZE);  //"파일명 인자" 명령 전체 복사 (strtok_r 전에 원본 문자 보존)
+            PGSIZE);  //"파일명 인자" 전체 복사 (strtok_r 전에 원본 문자 보존)
 
     char* token;
     char* saveptr;
     char* argv[128];  // 인자를 담기위한 포인터 배열 (충분한 크기로 선언)
     int argc = 0;
 
+    /* 2. 문자 분리 */
     // 첫 번째 토큰: 파일명
     token = strtok_r(file_name_copy, " ", &saveptr);
     if (token != NULL)
@@ -489,16 +515,29 @@ static bool load(const char* file_name, struct intr_frame* if_)
     /* 시작 주소. */
     if_->rip = ehdr.e_entry;
 
+    // TODO: 함수로 분리 : 명령행 인자 파싱/스택에 역순으로 복사/8바이트 정렬/값 배치
+    success = set_argument_stack(argc, argv, if_);
+
+done:
+    /* 로드 성공 여부와 관계없이 여기에 도달합니다. */
+    palloc_free_page(file_name_copy);  // palloc_get_page()로 할당했으므로 palloc_free_page()로 해제
+    file_close(file);
+    return success;
+}
+
+static bool set_argument_stack(int argc, char** argv, struct intr_frame* if_)
+{
+    bool success = false;
     /* 커널 메모리에서 유저 메모리로 문자열을 복사한다 (1~7)*/
     // 1. 문자열을 스택에 복사
     uintptr_t rsp = USER_STACK;  // 스택이 시작하는 주소
-    char* arg_addr[128];
+    char* arg_addr[128];         // 주소를 담을 포인터 배열
 
-    for (int i = argc - 1; i >= 0; i--)
+    for (int i = argc - 1; i >= 0; i--)  // 뒤>앞으로 넣어야 하기 때문에 숫자 줄이며 루프
     {
         int len = strlen(argv[i]) + 1;     // 인자의 길이(널센티널 포함)
         rsp -= len;                        // 스택 포인터를 문자열길이만큼 줄인다
-        memcpy((void*)rsp, argv[i], len);  // 실제 문자열을 스택
+        memcpy((void*)rsp, argv[i], len);  // 실제 문자열을 스택에 복사
         // NOTE: (void*)이유? > memcpy시그니처. 이 숫자를 메모리 주소로 해석하라는 의미.
         arg_addr[i] = (char*)rsp;  // 나중에 포인터 배열을 만들기 위해 각 문자열의 주소를 저장한다
     }
@@ -507,27 +546,27 @@ static bool load(const char* file_name, struct intr_frame* if_)
     while (rsp % 8 != 0)  // 8의 배수인지 아닌지 확인해서 8바이트 정렬 확인
     {
         rsp--;               // 1바이트 공간 확보하고
-        *(uint8_t*)rsp = 0;  // 그 주소에 0 쓰기
+        *(uint8_t*)rsp = 0;  // 그 주소에 0 쓰기 (패딩)
     }
 
     // 3. argv[argc] = null
     rsp -= 8;             // null이 몇바이트인지 모르겠지만 정렬 위해 8 줄인다
     *(char**)rsp = NULL;  // TODO: 포인터 모르겠다.
 
-    // 4. 포인터 배열 역순
+    // 4. 포인터 배열에 역순으로 저장했던 주소를 스택에 저장
     for (int i = argc - 1; i >= 0; i--)
     {
-        rsp -= 8;                    // 정렬 위해 8 줄인다
-        *(char**)rsp = arg_addr[i];  // 포인터 저장
+        rsp -= 8;
+        *(char**)rsp = arg_addr[i];  // 아까 저장했던 인자를 저장한 포인터 저장
     }
 
     // 5. argv 주소 저장
     char** argv_ptr = (char**)rsp;  // rsp가 정수형이니까 포인터 타입으로 변환
 
     // 6. fake return addr
-    // 일반 함수 호출시, caller가 return address를 스택에 푸시하는데, main 함수는 첫번째
-    // 함수라서 호출자가 없다 그래도 x86-64 ABI는 return address가 있다고 가정하므로 가짜
-    // 리턴주소를 넣어준다.
+    /* 일반 함수 호출시, caller가 return address를 스택에 푸시하는데, main 함수는 첫번째
+     * 함수라서 호출자가 없다 그래도 x86-64 ABI는 return address가 있다고 가정하므로 가짜
+     * 리턴주소를 넣어준다. */
     rsp -= 8;
     *(void**)rsp = 0;  // 만약 실수로 return하면 0 주소로 점프 → 즉시 page fault 발생 for 디버깅
 
@@ -537,6 +576,7 @@ static bool load(const char* file_name, struct intr_frame* if_)
     if_->rsp = rsp;
 
     success = true;
+    return success;
 
     /* 유저메모리
     높은 주소 (0x47480000)
@@ -554,12 +594,6 @@ static bool load(const char* file_name, struct intr_frame* if_)
     │ 0 (8 bytes)         │ <- fake return address
     └─────────────────────┘ <- rsp (최종 위치)
     낮은 주소*/
-
-done:
-    /* 로드 성공 여부와 관계없이 여기에 도달합니다. */
-    palloc_free_page(file_name_copy);  // palloc_get_page()로 할당했으므로 palloc_free_page()로 해제
-    file_close(file);
-    return success;
 }
 
 /* PHDR이 FILE에서 유효하고 로드 가능한 세그먼트를 설명하는지 확인하고

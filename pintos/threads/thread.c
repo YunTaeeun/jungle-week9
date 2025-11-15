@@ -535,7 +535,9 @@ static void init_thread(struct thread* t, const char* name, int priority)
     t->magic = THREAD_MAGIC;
     t->waiting_lock = NULL;
     t->exit_status = 0;
+    t->child_thread = NULL;
     list_init(&t->holding_locks);
+    sema_init(&t->wait_sema, 0);  // 0으로 초기화: 부모가 대기하도록
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should
