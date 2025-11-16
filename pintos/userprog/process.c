@@ -23,7 +23,7 @@
 #include "vm/vm.h"
 #endif
 
-static struct semaphore temporary;
+// static struct semaphore temporary;
 static void process_cleanup (void);
 static bool load (const char *file_name, struct intr_frame *if_);
 static void initd (void *f_name);
@@ -43,12 +43,12 @@ process_init (void) {
 // filename 은 'programname args ~' 이런식
 tid_t
 process_create_initd (const char *file_name) {
-	static bool sema_initialized = false;
-  if (!sema_initialized)
-  {
-    sema_init(&temporary, 0);
-    sema_initialized = true;
-  }
+	// static bool sema_initialized = false;
+  // if (!sema_initialized)
+  // {
+  //   sema_init(&temporary, 0);
+  //   sema_initialized = true;
+  // }
 	char *fn_copy;
 	tid_t tid;
 
@@ -65,7 +65,7 @@ process_create_initd (const char *file_name) {
 	strtok_r(file_name, " ", &ptr);
 
 	/* Create a new thread to execute FILE_NAME. */
-	// 프로그램을 실행할 쓰레드를 하나 만들고 , 그 쓰레드는 바로 initd 실행 (fn_copy를 인자로 받아서 -> fn_copy에는 programname args 다 들어있음)
+	// 프로그램을 실행할 자식 쓰레드를 하나 만들고 , 그 쓰레드는 바로 initd 실행 (fn_copy를 인자로 받아서 -> fn_copy에는 programname args 다 들어있음)
 	tid = thread_create (file_name, PRI_DEFAULT, initd, fn_copy);
 	if (tid == TID_ERROR)
 		palloc_free_page (fn_copy);
@@ -221,25 +221,58 @@ process_exec (void *f_name) {
  *
  * This function will be implemented in problem 2-2.  For now, it
  * does nothing. */
-// 10주차 새로운게 다 돌아갈 때 까지 기다리게
+// 10주차 부모가 자식 실행 기다려야 함.
+// 부모가 init.c 에서 자식의 tid 들고 이 함수로 옴 
 int
 process_wait (tid_t child_tid UNUSED) {
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
-	sema_down(&temporary);
-	return -1;
+	// sema_down(&temporary);
+	// 현재 쓰레드의 주체는 부모 쓰레드
+	struct thread *parent = thread_current();
+	struct list_elem *e;
+	struct thread *search_child = NULL;
+
+	// 부모의 child_list 순회하면서 자식 찾기
+	for(e = list_begin(&parent->child_list); e != list_end(&parent->child_list); e = list_next(e)) {
+		struct thread *t = list_entry(e, struct thread, child_elem) ;
+		if(t ->tid == child_tid) {
+			search_child = t;
+			break;
+		}
+	}
+
+	if(search_child == NULL) {
+		return -1 ;
+	}
+	
+	// 부모는 자식의 개인 세마포어를 기다리면서 sleep
+	sema_down(&search_child->wait_sema);
+	
+	// 깨어난뒤 -> 자식이 exit_status에 저장해둔 종료 코드 읽음
+	int status = search_child->exit_status;
+	// 부모 child_list에 꽂아둔 chile_elem 삭제
+	list_remove(&search_child->child_elem);
+
+	// 공간 해제
+	palloc_free_page(search_child);
+
+	return status;
 }
 
 /* Exit the process. This function is called by thread_exit (). */
 void
 process_exit (void) {
-	struct thread *curr = thread_current ();
+	// 현재 쓰레드의 주체는 자식 쓰레드
+	struct thread *cur_thread = thread_current ();
 	/* TODO: Your code goes here.
 	 * TODO: Implement process termination message (see
 	 * TODO: project2/process_termination.html).
 	 * TODO: We recommend you to implement process resource cleanup here. */
-	sema_up(&temporary);
+	//sema_up(&temporary);
+	// 자식 쓰레드의 sema 리스트 확인 -> 부모 깨움
+	sema_up(&cur_thread->wait_sema);
 	process_cleanup ();
 }
 
@@ -402,13 +435,6 @@ arg_load_stack(char *cmdline, struct intr_frame *if_) {
  * 
  * file_name: 실행할 유저 프로그램의 파일 이름
  * if_:       유저 프로그램이 시작될 때의 레지스터 상태를 저장하는 intr_frame
- * 
- * 이 함수는 다음 단계를 수행한다:
- * 1. 새로운 페이지 테이블(pml4)을 만들고 활성화
- * 2. 파일 시스템에서 실행 파일을 열고 ELF 헤더 검증
- * 3. 프로그램 헤더를 읽으며 메모리에 코드/데이터 세그먼트를 적재
- * 4. 유저 스택을 설정 (setup_stack)
- * 5. 진입점(e_entry)을 설정하여 CPU가 해당 주소부터 실행하도록 함
  */
 static bool
 load (const char *file_name, struct intr_frame *if_) {
@@ -529,7 +555,7 @@ load (const char *file_name, struct intr_frame *if_) {
 
 	/* TODO: 인자 전달 구현 (argument passing) */
 	// - 프로젝트 2에서 argv, argc 스택에 적재하는 부분 구현 예정
-	success = (file_name, if_);
+	success = arg_load_stack(file_name, if_);
 
 	//success = true;
 

@@ -7,10 +7,26 @@
 #include "userprog/gdt.h"
 #include "threads/flags.h"
 #include "intrinsic.h"
+#include "threads/init.h"  // power_off() 함수를 위해 추가
 
-void syscall_entry (void);
-void syscall_handler (struct intr_frame *);
+// 구현 핸들러
+// void halt (void) NO_RETURN;
+// void exit (int status) NO_RETURN;
+// pid_t fork (const char *thread_name);
+// int exec (const char *file);
+// int wait (pid_t);
+// bool create (const char *file, unsigned initial_size);
+// bool remove (const char *file);
+// int open (const char *file);
+// int filesize (int fd);
+// int read (int fd, void *buffer, unsigned length);
+// int write (int fd, const void *buffer, unsigned length);
+// void seek (int fd, unsigned position);
+// unsigned tell (int fd);
+// void close (int fd);
 
+void syscall_entry(void);
+void syscall_handler(struct intr_frame *);
 /* System call.
  *
  * Previously system call services was handled by the interrupt handler
@@ -19,28 +35,147 @@ void syscall_handler (struct intr_frame *);
  *
  * The syscall instruction works by reading the values from the the Model
  * Specific Register (MSR). For the details, see the manual. */
-
 #define MSR_STAR 0xc0000081         /* Segment selector msr */
 #define MSR_LSTAR 0xc0000082        /* Long mode SYSCALL target */
 #define MSR_SYSCALL_MASK 0xc0000084 /* Mask for the eflags */
+void syscall_init(void)
+{
+    write_msr(MSR_STAR, ((uint64_t)SEL_UCSEG - 0x10) << 48 | ((uint64_t)SEL_KCSEG) << 32);
+    write_msr(MSR_LSTAR, (uint64_t)syscall_entry);
+    /* The interrupt service rountine should not serve any interrupts
+     * until the syscall_entry swaps the userland stack to the kernel
+     * mode stack. Therefore, we masked the FLAG_FL. */
+    write_msr(MSR_SYSCALL_MASK, FLAG_IF | FLAG_TF | FLAG_DF | FLAG_IOPL | FLAG_AC | FLAG_NT);
+}
 
-void
-syscall_init (void) {
-	write_msr(MSR_STAR, ((uint64_t)SEL_UCSEG - 0x10) << 48  |
-			((uint64_t)SEL_KCSEG) << 32);
-	write_msr(MSR_LSTAR, (uint64_t) syscall_entry);
-
-	/* The interrupt service rountine should not serve any interrupts
-	 * until the syscall_entry swaps the userland stack to the kernel
-	 * mode stack. Therefore, we masked the FLAG_FL. */
-	write_msr(MSR_SYSCALL_MASK,
-			FLAG_IF | FLAG_TF | FLAG_DF | FLAG_IOPL | FLAG_AC | FLAG_NT);
+// 10주차 : 시스템 콜이 인자로 넘겨준 주소(Address)나 포인터(Pointer)를 검사 (잘못된 주소 접근 시 유저 프로그램만 다운)
+check_address(void *addr)
+{
+	struct thread *cur_thread = thread_current();
+	// NULL or 커널 영역 접근 시 exit 
+	if(addr == NULL || !is_user_vaddr(addr)) {
+		thread_exit();
+	}
 }
 
 /* The main system call interface */
+/* userprog/syscall.c */
+
+/* The main system call interface */
 void
-syscall_handler (struct intr_frame *f UNUSED) {
-	// TODO: Your implementation goes here.
-	printf ("system call!\n");
-	thread_exit ();
+syscall_handler (struct intr_frame *f)
+{
+  /* 시스템 콜 번호는 rax 레지스터에 저장됨 */
+  int syscall_num = f->R.rax;
+
+  switch (syscall_num)
+  {
+    case SYS_HALT:    /* Halt the operating system. */
+      sys_halt(f);
+      break;
+    case SYS_EXIT:    /* Terminate this process. */
+      sys_exit(f);
+      break;
+    case SYS_FORK:    /* Clone current process. */
+      sys_fork(f);
+      break;
+    case SYS_EXEC:    /* Switch current process. */
+      sys_exec(f);
+      break;
+    case SYS_WAIT:    /* Wait for a child process to die. */
+      sys_wait(f);
+      break;
+    case SYS_CREATE:  /* Create a file. */
+      sys_create(f);
+      break;
+    case SYS_REMOVE:  /* Delete a file. */
+      sys_remove(f);
+      break;
+    case SYS_OPEN:    /* Open a file. */
+      sys_open(f);
+      break;
+    case SYS_FILESIZE:/* Obtain a file's size. */
+      sys_filesize(f);
+      break;
+    case SYS_READ:    /* Read from a file. */
+      sys_read(f);
+      break;
+    case SYS_WRITE:   /* Write to a file. */
+      sys_write(f);
+      break;
+    case SYS_SEEK:    /* Change position in a file. */
+      sys_seek(f);
+      break;
+    case SYS_TELL:    /* Report current position in a file. */
+      sys_tell(f);
+      break;
+    case SYS_CLOSE:   /* Close a file. */
+      sys_close(f);
+      break;
+    default:
+      /* 미구현 시스템 콜 */
+      printf("Unimplemented system call: %d\n", syscall_num);
+      thread_exit();
+      break;
+  }
 }
+
+
+
+void sys_halt(struct intr_frame *f)
+{
+	power_off();
+}
+
+void sys_exit(struct intr_frame *f)
+{
+	struct thread *cur_thread = thread_current();
+  int status = f->R.rdi;  // 첫 번째 인자
+	// 현재 쓰레드(자식)의 상태 저장 -> 이후에 부모 쓰레드가 확인함
+	cur_thread->exit_status = status;
+  printf("%s: exit(%d)\n", thread_current()->name, status);
+  thread_exit();
+}
+
+void sys_fork() {}
+void sys_exec() {}
+
+void sys_wait (struct intr_frame *f) 
+{
+  // 1. 첫 번째 인자(rdi)에서 기다릴 'child_tid'를 읽어옵니다.
+  tid_t child_tid = (tid_t)f->R.rdi;
+  
+  // 2. ⭐️ (핵심) 이전에 구현한 '진짜' wait 함수를 호출합니다.
+  int status = process_wait(child_tid); 
+  
+  // 3. 자식의 종료 코드(status)를 반환값 레지스터(rax)에 저장합니다.
+  f->R.rax = status;
+}
+
+void sys_create() {}
+void sys_remove() {}
+void sys_open() {}
+void sys_filesize() {}
+void sys_read() {}
+
+void sys_write(struct intr_frame *f)
+{
+	// write 콜도 표준 규약에 따라 인자를 받는다
+  int fd = f->R.rdi;                      // 1번 인자 : rdi -> fd (파일 디스크립터)
+  const void *buffer = (void *)f->R.rsi;  // 2번 인자 : buffer (출력할 문자의 주소)
+  unsigned size = f->R.rdx;               // 3번 인자 : size (출력할 문자의 길이)
+	check_address(buffer);									// 사용자가 넘겨준 buffer 주소를 읽어도 되는지 확인
+  if (fd == 1)
+  {                          
+  	putbuf(buffer, size);  // 버퍼를 콘솔에 출력
+    f->R.rax = size;       
+  }
+  else
+  {
+    f->R.rax = -1;  // 다른 fd는 아직 미구현
+  }
+}
+
+void sys_seek() {}
+void sys_tell() {}
+void sys_close() {}
