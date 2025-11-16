@@ -255,11 +255,13 @@ run_task (char **argv) {
 		run_test (task);
 	} else {
 		// 10주차 fork 시켜놓고 원래 프로그램이 죽기 전에 fork 된 프로그램이 돌아가게 원래 프로그램이 기다려야 한다
+		// 📌 여기서 부모 쓰레드는 process_create_initd 로 가서 자식 쓰레드 만들고 여기로 다시 돌아와서 process_wait(자식의 tid) 실행함.
 		process_wait (process_create_initd (task));
 	}
 #else
 	run_test (task);
 #endif
+	// 그리고 이후에 자식이 종료돼서 부모 쓰레드가 다시 실행되면 여기로 돌아옴	-> 이후 밑에 power_off -> PintOS 종료
 	printf ("Execution of '%s' complete.\n", task);
 }
 
