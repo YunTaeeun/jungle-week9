@@ -48,14 +48,69 @@ void syscall_init(void)
     write_msr(MSR_SYSCALL_MASK, FLAG_IF | FLAG_TF | FLAG_DF | FLAG_IOPL | FLAG_AC | FLAG_NT);
 }
 
-// 10주차 : 시스템 콜이 인자로 넘겨준 주소(Address)나 포인터(Pointer)를 검사 (잘못된 주소 접근 시 유저 프로그램만 다운)
-check_address(void *addr)
-{
-	struct thread *cur_thread = thread_current();
-	// NULL or 커널 영역 접근 시 exit 
-	if(addr == NULL || !is_user_vaddr(addr)) {
-		thread_exit();
-	}
+/*         유저 메모리 검증 함수들              */
+/* 단일 주소가 유효한 유저 주소인지 검사 */
+void
+check_address(void *addr) {
+    struct thread *cur = thread_current();
+
+    // 1. NULL이거나, 2. 커널 영역 주소일 때
+    if (addr == NULL || !is_user_vaddr(addr)) {
+        exit_with_status(-1);
+    }
+
+    // 매핑되지 않은 주소일 때 (pml4_get_page가 NULL 반환)
+    if (pml4_get_page(cur->pml4, addr) == NULL) {
+        exit_with_status(-1);
+    }
+}
+
+/* 버퍼 전체가 유효한지 검사 */
+void
+check_buffer(void *buffer, size_t size) {
+    if (size == 0) return;
+    
+    check_address(buffer);
+    check_address(buffer + size - 1);
+}
+
+/* 유저 문자열을 커널 공간으로 안전하게 복사 */
+// 올바른 코드
+char *
+copy_user_string(const char *ustr) {
+    // 1. ⭐️ 시작 주소부터 '방탄' check_address로 검사
+    check_address(ustr); 
+    
+    char *kstr = palloc_get_page(0);
+    if (kstr == NULL) {
+        exit_with_status(-1); // 일관성 있게 exit
+    }
+    
+    int i;
+    for (i = 0; i < PGSIZE; i++) {
+        // 2. ⭐️ 루프를 돌며 다음 주소도 '방탄' check_address로 검사
+        check_address(ustr + i);
+        
+        // 3. '검사 후' 안전하게 읽기
+        kstr[i] = ustr[i];
+        
+        if (kstr[i] == '\0') {
+            return kstr; // 성공!
+        }
+    }
+    
+    // ⭐️ PGSIZE까지 \0가 안나옴 (문자열이 너무 김)
+    palloc_free_page(kstr);
+    exit_with_status(-1);
+}
+
+/* 종료 코드와 함께 프로세스 종료 */
+void
+exit_with_status(int status) {
+    struct thread *cur = thread_current();
+    cur->exit_status = status;
+    printf("%s: exit(%d)\n", cur->name, status);
+    thread_exit();
 }
 
 /* The main system call interface */
@@ -124,6 +179,7 @@ syscall_handler (struct intr_frame *f)
 
 void sys_halt(struct intr_frame *f)
 {
+	// 핀토스 종료
 	power_off();
 }
 
@@ -138,7 +194,11 @@ void sys_exit(struct intr_frame *f)
 }
 
 void sys_fork() {}
-void sys_exec() {}
+
+
+
+void
+sys_exec(struct intr_frame *f) {}
 
 void sys_wait (struct intr_frame *f) 
 {
@@ -152,8 +212,23 @@ void sys_wait (struct intr_frame *f)
   f->R.rax = status;
 }
 
-void sys_create() {}
-void sys_remove() {}
+void sys_create(struct intr_frame *f) {
+    const char *file = (const char *)f->R.rdi;
+    unsigned initial_size = (unsigned)f->R.rsi;
+    
+    check_address(file);
+    
+    // filesys_create 호출 (filesys/filesys.c에 이미 구현됨)
+    f->R.rax = filesys_create(file, initial_size);
+}
+
+void sys_remove(struct intr_frame *f) {
+    const char *file = (const char *)f->R.rdi;
+    check_address(file);
+    
+    f->R.rax = filesys_remove(file);
+}
+
 void sys_open() {}
 void sys_filesize() {}
 void sys_read() {}
@@ -164,7 +239,7 @@ void sys_write(struct intr_frame *f)
   int fd = f->R.rdi;                      // 1번 인자 : rdi -> fd (파일 디스크립터)
   const void *buffer = (void *)f->R.rsi;  // 2번 인자 : buffer (출력할 문자의 주소)
   unsigned size = f->R.rdx;               // 3번 인자 : size (출력할 문자의 길이)
-	check_address(buffer);									// 사용자가 넘겨준 buffer 주소를 읽어도 되는지 확인
+	check_buffer(buffer, size);									// 사용자가 넘겨준 buffer 주소를 읽어도 되는지 확인
   if (fd == 1)
   {                          
   	putbuf(buffer, size);  // 버퍼를 콘솔에 출력

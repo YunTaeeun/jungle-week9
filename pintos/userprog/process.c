@@ -256,7 +256,7 @@ process_wait (tid_t child_tid UNUSED) {
 	list_remove(&search_child->child_elem);
 
 	// 공간 해제
-	palloc_free_page(search_child);
+	// palloc_free_page(search_child);
 
 	return status;
 }
