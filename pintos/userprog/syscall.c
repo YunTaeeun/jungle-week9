@@ -78,7 +78,7 @@ check_buffer(void *buffer, size_t size) {
 // 올바른 코드
 char *
 copy_user_string(const char *ustr) {
-    // 1. ⭐️ 시작 주소부터 '방탄' check_address로 검사
+    // 1. 시작 주소부터 check_address로 검사
     check_address(ustr); 
     
     char *kstr = palloc_get_page(0);
@@ -88,7 +88,7 @@ copy_user_string(const char *ustr) {
     
     int i;
     for (i = 0; i < PGSIZE; i++) {
-        // 2. ⭐️ 루프를 돌며 다음 주소도 '방탄' check_address로 검사
+        // 2. 루프를 돌며 다음 주소도 check_address로 검사
         check_address(ustr + i);
         
         // 3. '검사 후' 안전하게 읽기
@@ -99,7 +99,7 @@ copy_user_string(const char *ustr) {
         }
     }
     
-    // ⭐️ PGSIZE까지 \0가 안나옴 (문자열이 너무 김)
+    // PGSIZE까지 \0가 안나옴 (문자열이 너무 김)
     palloc_free_page(kstr);
     exit_with_status(-1);
 }
