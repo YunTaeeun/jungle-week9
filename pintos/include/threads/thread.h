@@ -151,7 +151,7 @@ struct thread {
 	struct semaphore wait_sema; // 자식이 종료될 떄 부모를 꺠우기 위한 개인 세마포어 
 	struct list child_list; // 부모가 가질 자식들의 리스트
 	struct list_elem child_elem; // 자식이 부모의 리스트에 연결할때 쓸 elem
-
+	
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
 	// pml4는 스레드가 아니라, 해당 스레드(프로세스)가 사용하는 '가상 메모리 주소록' 그 자체를 가리키는 포인터

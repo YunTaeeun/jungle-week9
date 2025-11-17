@@ -8,6 +8,7 @@
 #include "threads/flags.h"
 #include "intrinsic.h"
 #include "threads/init.h"  // power_off() 함수를 위해 추가
+#include "threads/palloc.h"
 
 // 구현 핸들러
 // void halt (void) NO_RETURN;
@@ -197,22 +198,44 @@ void sys_fork() {}
 
 
 
+
 void
-sys_exec(struct intr_frame *f) {}
+sys_exec(struct intr_frame *f)
+{
+    const char *u_cmd = (const char *)f->R.rdi;
+
+    char *k_cmd = copy_user_string(u_cmd);
+    if (k_cmd == NULL) {
+        exit_with_status(-1); 
+        return;
+    }
+
+    int ret = process_exec(k_cmd);
+
+    /* process_exec가 리턴했다는 건 load 실패를 의미함 (-1) */
+    if (ret == -1) {
+        exit_with_status(-1); 
+        return;
+    }
+    // 성공 시 절대 여기로 오지 않음
+    NOT_REACHED();
+}
+
 
 void sys_wait (struct intr_frame *f) 
 {
   // 1. 첫 번째 인자(rdi)에서 기다릴 'child_tid'를 읽어옵니다.
   tid_t child_tid = (tid_t)f->R.rdi;
   
-  // 2. ⭐️ (핵심) 이전에 구현한 '진짜' wait 함수를 호출합니다.
+  // 2. 이전에 구현한 '진짜' wait 함수를 호출합니다.
   int status = process_wait(child_tid); 
   
   // 3. 자식의 종료 코드(status)를 반환값 레지스터(rax)에 저장합니다.
   f->R.rax = status;
 }
 
-void sys_create(struct intr_frame *f) {
+void sys_create(struct intr_frame *f) 
+{
     const char *file = (const char *)f->R.rdi;
     unsigned initial_size = (unsigned)f->R.rsi;
     
@@ -222,7 +245,8 @@ void sys_create(struct intr_frame *f) {
     f->R.rax = filesys_create(file, initial_size);
 }
 
-void sys_remove(struct intr_frame *f) {
+void sys_remove(struct intr_frame *f) 
+{
     const char *file = (const char *)f->R.rdi;
     check_address(file);
     
@@ -239,7 +263,7 @@ void sys_write(struct intr_frame *f)
   int fd = f->R.rdi;                      // 1번 인자 : rdi -> fd (파일 디스크립터)
   const void *buffer = (void *)f->R.rsi;  // 2번 인자 : buffer (출력할 문자의 주소)
   unsigned size = f->R.rdx;               // 3번 인자 : size (출력할 문자의 길이)
-	check_buffer(buffer, size);									// 사용자가 넘겨준 buffer 주소를 읽어도 되는지 확인
+	check_buffer(buffer, size);							// 사용자가 넘겨준 buffer 주소를 읽어도 되는지 확인
   if (fd == 1)
   {                          
   	putbuf(buffer, size);  // 버퍼를 콘솔에 출력

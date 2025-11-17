@@ -556,6 +556,7 @@ init_thread (struct thread *t, const char *name, int priority) {
 	// 10주차 자식 관리 위한 초기화
 	sema_init(&t->wait_sema, 0);
 	list_init(&t->child_list);
+
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should

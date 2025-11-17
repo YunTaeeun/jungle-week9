@@ -43,12 +43,6 @@ process_init (void) {
 // filename 은 'programname args ~' 이런식
 tid_t
 process_create_initd (const char *file_name) {
-	// static bool sema_initialized = false;
-  // if (!sema_initialized)
-  // {
-  //   sema_init(&temporary, 0);
-  //   sema_initialized = true;
-  // }
 	char *fn_copy;
 	tid_t tid;
 
@@ -212,6 +206,8 @@ process_exec (void *f_name) {
   NOT_REACHED ();
 }
 
+
+
 /* Waits for thread TID to die and returns its exit status.  If
  * it was terminated by the kernel (i.e. killed due to an
  * exception), returns -1.  If TID is invalid or if it was not a
@@ -225,10 +221,6 @@ process_exec (void *f_name) {
 // 부모가 init.c 에서 자식의 tid 들고 이 함수로 옴 
 int
 process_wait (tid_t child_tid UNUSED) {
-	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
-	 * XXX:       to add infinite loop here before
-	 * XXX:       implementing the process_wait. */
-	// sema_down(&temporary);
 	// 현재 쓰레드의 주체는 부모 쓰레드
 	struct thread *parent = thread_current();
 	struct list_elem *e;
