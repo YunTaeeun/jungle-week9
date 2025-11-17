@@ -17,7 +17,8 @@
 #include "threads/thread.h"
 #include "threads/mmu.h"
 #include "threads/vaddr.h"
-#include "threads/synch.h"  // 세마포어 사용을 위해 추가
+#include "threads/synch.h"   // 세마포어 사용을 위해 추가
+#include "threads/loader.h"  // LOADER_ARGS_LEN 정의
 #include "intrinsic.h"
 #ifdef VM
 #include "vm/vm.h"
@@ -41,23 +42,18 @@ static void process_init(void)
  * before process_create_initd() returns. Returns the initd's
  * thread id, or TID_ERROR if the thread cannot be created.
  * Notice that THIS SHOULD BE CALLED ONCE. */
-/* FILE_NAME에서 로드된 "initd"라는 첫 번째 사용자 프로그램을 시작합니다.
- * 새 스레드는 process_create_initd()가 반환되기 전에 스케줄링될 수 있으며(심지어 종료될 수도 있음)
- * initd의 스레드 ID를 반환하거나, 스레드를 생성할 수 없으면 TID_ERROR를 반환합니다.
- * 주의: 이 함수는 한 번만 호출되어야 합니다. */
+// filename 은 'programname args ~' 이런식
 tid_t process_create_initd(const char* file_name)
 {
-    char* fn_copy;  // 파일 이름 복사본을 저장할 포인터
-    tid_t tid;      // 생성된 스레드의 ID
+    char* fn_copy;
+    tid_t tid;
 
     /* Make a copy of FILE_NAME.
      * Otherwise there's a race between the caller and load(). */
-    /* FILE_NAME의 복사본을 만듭니다.
-     * 그렇지 않으면 호출자와 load() 사이에 경쟁 조건이 발생합니다. */
-    fn_copy = palloc_get_page(0);         // 페이지 할당자로부터 페이지 하나 할당
-    if (fn_copy == NULL)                  // 할당 실패 시
-        return TID_ERROR;                 // 에러 반환
-    strlcpy(fn_copy, file_name, PGSIZE);  // 파일 이름을 할당된 페이지에 복사
+    fn_copy = palloc_get_page(0);
+    if (fn_copy == NULL) return TID_ERROR;
+    // fn_copy = 'programname args ~'
+    strlcpy(fn_copy, file_name, PGSIZE);
 
     /* Create a new thread to execute FILE_NAME. */
     /* FILE_NAME을 실행할 새 스레드를 생성합니다. */
@@ -66,15 +62,15 @@ tid_t process_create_initd(const char* file_name)
     char* space = strchr(thread_name, ' ');
     if (space != NULL) *space = '\0';
 
-    tid = thread_create(thread_name, PRI_DEFAULT, initd,
-                        fn_copy);   // 새 스레드 생성
-    if (tid == TID_ERROR)           // 스레드 생성 실패 시
-        palloc_free_page(fn_copy);  // 할당했던 페이지 해제
-    return tid;                     // 생성된 스레드 ID 반환
+    /* Create a new thread to execute FILE_NAME. */
+    // 프로그램을 실행할 쓰레드를 하나 만들고 , 그 쓰레드는 바로 initd 실행 (fn_copy를 인자로 받아서
+    // -> fn_copy에는 programname args 다 들어있음)
+    tid = thread_create(thread_name, PRI_DEFAULT, initd, fn_copy);
+    if (tid == TID_ERROR) palloc_free_page(fn_copy);
+    return tid;
 }
 
-/* A thread function that launches first user process. */
-/* 첫 번째 사용자 프로세스를 실행하는 스레드 함수 */
+/* 첫 번째 사용자 프로세스를 실행하는 스레드 함수입니다. */
 static void initd(void* f_name)
 {
 #ifdef VM

@@ -545,6 +545,7 @@ static void init_thread(struct thread *t, const char *name, int priority)
     t->exec_file = NULL;
     t->exit_status = 0;
     sema_init(&t->exit_sema, 0);  // exit_sema 초기화 (0으로 시작)
+    sema_init(&t->wait_sema, 0);  // wait_sema 초기화 (0으로 시작)
     list_init(&t->children);      // children 리스트 초기화
     t->parent = NULL;             // 부모 포인터 초기화
     t->waited = false;            // waited 플래그 초기화

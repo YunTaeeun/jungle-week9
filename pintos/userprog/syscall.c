@@ -276,7 +276,8 @@ static void sys_exec(struct intr_frame *f UNUSED)
     check_valid_string(file);
     if (!process_exec((void *)file))
     {  // 실행에 실패 하면 exit
-        sys_exit(f);
+        thread_current()->exit_status = -1;
+        thread_exit();
     }
 }
 
@@ -352,15 +353,14 @@ static void sys_filesize(struct intr_frame *f UNUSED)
     int fd = f->R.rdi;
     struct thread *t = thread_current();
     // 확인할 파일이 있으면
-    if (t->fds[fd] != NULL)
-    {  // 확인해서 값 반환
-        lock_acquire(&filesys_lock);
-        f->R.rax = file_length(t->fds[fd]);
-        lock_release(&filesys_lock);
+    if (fd < 2 || fd >= MAX_FD || t->fds[fd] == NULL)
+    {
+        f->R.rax = -1;
         return;
     }
-    // 없는 파일이면 -1 반환
-    f->R.rax = -1;
+    lock_acquire(&filesys_lock);
+    f->R.rax = file_length(t->fds[fd]);
+    lock_release(&filesys_lock);
 }
 
 static void sys_read(struct intr_frame *f UNUSED)
