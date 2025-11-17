@@ -14,6 +14,8 @@ void syscall_entry(void);
 void syscall_handler(struct intr_frame*);
 bool is_valid_buffer(const void* buffer, unsigned length);
 
+static struct intr_frame* current_syscall_frame;
+
 /* 시스템 콜 처리
  *
  * 과거에는 시스템 콜을 인터럽트 핸들러로 처리했습니다 (예: 리눅스의 int 0x80).
@@ -62,12 +64,14 @@ void syscall_handler(struct intr_frame* f UNUSED)
             exit((int)arg1);
             break;
         case SYS_FORK:
-            // fork 구현
+            current_syscall_frame = f;
+            pid_t pid = fork((const char*)arg1);
+            f->R.rax = pid; // 부모 프로세스의 입장에서 반환값을 pid로 설정
+        case SYS_EXEC:  //TODO: wait 테스트 하려면 구현 필요
+            // 현재 프로세스의 메모리를 새로운 프로그램으로 교체
+            // 새 프로그램의 실행 파일을 로드
             break;
-        case SYS_EXEC:
-            // exec 구현
-            break;
-        case SYS_WAIT:
+        case SYS_WAIT:  //TODO: fork 테스트 하려면 구현 필요
             // wait 구현
             break;
         case SYS_CREATE:
@@ -79,15 +83,13 @@ void syscall_handler(struct intr_frame* f UNUSED)
         case SYS_OPEN:
             // open 구현
             break;
-        case SYS_FILESIZE:  // TODO:
+        case SYS_FILESIZE: 
             // filesize(0);
             break;
         case SYS_READ:
             // read 구현
             break;
         case SYS_WRITE:
-            // printf("[SYSCALL_SYS_WRITE] called: fd=%d, buffer=%p, length=%u\n", (int)arg1,
-                //    (void*)arg2, (unsigned)arg3);
             f->R.rax = write((int)arg1, (const void*)arg2, (unsigned)arg3);
             break;
         case SYS_SEEK:
@@ -104,7 +106,6 @@ void syscall_handler(struct intr_frame* f UNUSED)
             break;
     }
     // printf("system call!\n");
-    // printf("[SYSCALL_HANDLER] Finished handling syscall %d\n", syscall_number);
 }
 
 // 시스템 종료
@@ -163,6 +164,25 @@ int write(int fd, const void* buffer, unsigned length)
     }
 }
 
+bool is_valid_user_memory(void* ptr)
+{
+    // 1. 널 포인터 체크
+    if(ptr == NULL)
+        return false;
+
+    // 2. 커널 메모리 침범 여부 확인
+    if(!is_user_vaddr(ptr))
+        return false;
+
+    // 3. 가상주소에 매핑된 물리주소가 있는지 체크
+    // pml4_get_page에서 코드 시작 전 영역 (0x400000) 인지도 체크하고 있음
+    if(pml4_get_page(thread_current()->pml4, ptr) == NULL)
+        return false; 
+
+    return true;    // 모든 검사 통과
+    
+}
+
 bool is_valid_buffer(const void* buffer, unsigned length)
 {
     const uint8_t* ptr = (const uint8_t*)buffer;
@@ -170,8 +190,8 @@ bool is_valid_buffer(const void* buffer, unsigned length)
     // 버퍼 시작부터 끝까지 전부 체크
     for (unsigned i = 0; i < length; i++)
     {
-        if (ptr + i == NULL || !is_user_vaddr(ptr + i) ||
-            pml4_get_page(thread_current()->pml4, buffer) == NULL)
+        if (ptr + i == NULL || !(is_user_vaddr(ptr + i)) ||
+            pml4_get_page(thread_current()->pml4, ptr + i) == NULL)
         {
             return false;
         }
@@ -180,3 +200,11 @@ bool is_valid_buffer(const void* buffer, unsigned length)
 }
 
 int filesize(int fd) {}
+
+pid_t fork(const char* thread_name)
+{
+    tid_t pid = process_fork(thread_name, current_syscall_frame);
+
+    if(pid == TID_ERROR) return -1;   
+    return pid;
+}

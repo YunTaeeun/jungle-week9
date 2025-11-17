@@ -89,60 +89,100 @@ static void initd(void* f_name)
 	NOT_REACHED ();
 }
 
+/* fork할 때 필요한 인자들을 담는 구조체를 선언/정의한다. */
+struct fork_args {
+    struct thread* parent;
+    struct intr_frame* parent_if;
+    struct semaphore child_create;
+    bool success;
+};
+
 /* 현재 프로세스를 `name`으로 복제합니다. 새 프로세스의 스레드 ID를 반환하거나,
  * 스레드를 생성할 수 없으면 TID_ERROR를 반환합니다. */
 tid_t process_fork(const char* name, struct intr_frame* if_ UNUSED)
 {
+    /* fork인자용 구조체에 데이터를 담는다 */
+    struct fork_args args = {
+        .parent = thread_current(),
+        .parent_if = if_,
+        .success = false
+    };
+    sema_init(&args.child_create, 0);    
+
     /* 현재 스레드를 새 스레드로 복제합니다. */
-    return thread_create(name, PRI_DEFAULT, __do_fork, thread_current());
+    tid_t child_tid = thread_create(name, PRI_DEFAULT, __do_fork, &args);
+    /* 스레드 생성에 실패하면 무의미한 대기를 하지 않고, 바로 TID_ERROR를 반환한다 */
+    if(child_tid == TID_ERROR)
+    {
+        return TID_ERROR;
+    }
+
+    /* 자식 프로세스 생성과 복제가 완료될 때까지 부모 프로세스는 기다린다 */
+    sema_down(&args.child_create);
+
+    /* 복제 성공 여부를 판단한다 */
+    if(!args.success)
+    {
+        return TID_ERROR;
+    }
+
+    /* 자식 프로세스 생성 결과를 돌려준다. */
+    return child_tid;
 }
 
 #ifndef VM
 /* 이 함수를 pml4_for_each에 전달하여 부모의 주소 공간을 복제합니다.
- * 이것은 프로젝트 2 전용입니다. */
+ * 이것은 프로젝트 2 전용입니다. 
+ * pte: 페이지 테이블 엔트리
+ * va: 가상 주소 (현재 처리 중인 페이지의 주소)
+ * aux: 부모 스레드 포인터
+ */
 static bool duplicate_pte(uint64_t* pte, void* va, void* aux)
 {
     struct thread* current = thread_current();
     struct thread* parent = (struct thread*)aux;
     void* parent_page;
     void* newpage;
-    bool writable;
+    bool writable = false;
 
-    /* 1. TODO: parent_page가 커널 페이지이면, 즉시 반환합니다. */
+    /* 1. 커널 페이지는 건너뛰기 */
+    if(!is_user_vaddr(va)) return true;
 
-    /* 2. 부모의 페이지 맵 레벨 4에서 VA를 해석합니다. */
-    parent_page = pml4_get_page(parent->pml4, va);
+    /* 2. 부모 페이지 가져오기 */
+    parent_page = pml4_get_page(parent->pml4, va); 
 
-    /* 3. TODO: 자식을 위해 새 PAL_USER 페이지를 할당하고 결과를
-     *    TODO: NEWPAGE에 설정합니다. */
+    /* 3. 새 페이지 할당 */
+    newpage = palloc_get_page(PAL_USER);
+    if(newpage == NULL) return false;    
 
-    /* 4. TODO: 부모의 페이지를 새 페이지로 복제하고
-     *    TODO: 부모의 페이지가 쓰기 가능한지 확인합니다 (결과에 따라
-     *    TODO: WRITABLE을 설정). */
+    /* 4. 복제&권한 확인 */
+    memcpy(newpage, parent_page, PGSIZE);
+    if(*pte & PTE_W) writable = true;
 
-    /* 5. WRITABLE 권한으로 주소 VA에 자식의 페이지 테이블에 새 페이지를 추가합니다. */
+    /* 5. 자식의 페이지 테이블에 새 페이지를 추가 */
     if (!pml4_set_page(current->pml4, va, newpage, writable))
     {
-        /* 6. TODO: 페이지 삽입 실패 시, 에러 처리를 합니다. */
+        /* 6. 페이지 삽입 실패 시, 에러 처리 */
+        palloc_free_page(newpage);  // 메모리 해제
+        return false;   // 전체 fork 실패처리
     }
     return true;
 }
 #endif
 
-/* 부모의 실행 컨텍스트를 복사하는 스레드 함수입니다.
- * 힌트) parent->tf는 프로세스의 사용자 영역 컨텍스트를 가지고 있지 않습니다.
- *       즉, process_fork의 두 번째 인자를 이 함수에 전달해야 합니다. */
+/* 부모의 실행 컨텍스트를 복사하는 스레드 함수 */
 static void __do_fork(void* aux)
 {
+    struct fork_args* args = (struct fork_agrs*)aux;
     struct intr_frame if_;
-    struct thread* parent = (struct thread*)aux;
+    struct thread* parent = args->parent;
     struct thread* current = thread_current();
-    /* TODO: parent_if를 어떻게든 전달합니다. (즉, process_fork()의 if_) */
-    struct intr_frame* parent_if;
+    struct intr_frame* parent_if = args->parent_if;
     bool succ = true;
 
     /* 1. CPU 컨텍스트를 로컬 스택으로 읽어옵니다. */
     memcpy(&if_, parent_if, sizeof(struct intr_frame));
+    if_.R.rax = 0;  // 자식 프로세스의 입장에서 fork()의 반환값을 0으로 설정
 
     /* 2. 페이지 테이블을 복제합니다 */
     current->pml4 = pml4_create();
@@ -161,11 +201,27 @@ static void __do_fork(void* aux)
      * TODO:       사용하세요. 부모는 이 함수가 부모의 리소스를 성공적으로 복제할 때까지
      * TODO:       fork()에서 반환하면 안 됩니다. */
 
+    //TODO: 일단 파일 복제는 건너뛰고 open 구현 후에 수정.
+    // if (파일_복제_실패) {
+    //     succ = false;
+    //     goto error;
+    // }
     process_init();
+
+    /* 수행 성공을 저장 */
+    args->success = true;  
+    /* 부모 프로세스에게 종료를 알린다 */
+    sema_up(&args->child_create);
 
     /* 마지막으로, 새로 생성된 프로세스로 전환합니다. */
     if (succ) do_iret(&if_);
+
+    
 error:
+    /* 수행 실패를 저장하고 부모 프로세스에게 종료를 알린다. */
+    args->success = false;  // 명시적으로 보여주기 위해 써줌
+    sema_up(&args->child_create);
+
     thread_exit();
 }
 

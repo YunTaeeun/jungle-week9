@@ -5,6 +5,7 @@
 #include <debug.h>
 #include <stddef.h>
 
+
 /* 프로세스 식별자 */
 typedef int pid_t;
 #define PID_ERROR ((pid_t) - 1)
@@ -23,6 +24,7 @@ typedef int off_t;
 /* Project 2 이후 구현 */
 void halt(void) NO_RETURN;
 void exit(int status) NO_RETURN;
+// pid_t fork(const char* thread_name, struct intr_frame* if_ UNUSED);
 pid_t fork(const char* thread_name);
 int exec(const char* file);
 int wait(pid_t);

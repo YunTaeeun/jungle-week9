@@ -143,7 +143,7 @@ pdp_for_each (uint64_t *pdp,
 	return true;
 }
 
-/* 커널의 pte 엔트리를 포함하여 사용 가능한 모든 pte 엔트리에 FUNC를 적용한다. */
+/* 모든 페이지를 순회한다 */
 bool
 pml4_for_each (uint64_t *pml4, pte_for_each_func *func, void *aux) {
 	for (unsigned i = 0; i < PGSIZE / sizeof(uint64_t *); i++) {
