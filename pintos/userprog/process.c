@@ -309,8 +309,7 @@ void process_exit(void)
      * TODO: 여기에 프로세스 리소스 정리를 구현하는 것을 권장합니다. */
     /* 대기 중인 부모 프로세스 깨우기 */
 
-
-        struct thread* t = thread_current();
+    struct thread* t = thread_current();
 
     // 파일 디스크립터 정리
     // 모든 열린 파일 닫기
