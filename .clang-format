@@ -1,10 +1,10 @@
-# BasedOnStyle: Google
-# IndentWidth: 4
-# TabWidth: 4
-# UseTab: Never
-# AllowShortFunctionsOnASingleLine: Inline
-# ColumnLimit: 100
-# BreakBeforeBraces: Allman
-# SortIncludes: false
-# PointerAlignment: Left
-# SpaceBeforeParens: ControlStatements
+BasedOnStyle: LLVM
+IndentWidth: 8
+TabWidth: 8
+UseTab: Always
+AllowShortFunctionsOnASingleLine: None
+ColumnLimit: 80
+BreakBeforeBraces: Linux
+SortIncludes: false
+PointerAlignment: Right
+SpaceBeforeParens: ControlStatements
