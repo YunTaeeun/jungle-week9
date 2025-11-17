@@ -22,6 +22,23 @@ for t in exec-{once,arg,boundary,missing,bad-ptr,read} fork-{once,multiple,recur
 
 
 
+# 현재 실제 통과한 테스트 (2025-11-17 기준, 실제 실행 결과 반영)
+# 통과: 28개 / 전체: 64개 (43.75%)
+# Argument Passing (5개 모두 통과)
+for t in args-{none,single,multiple,many,dbl-space}; do make tests/userprog/$t.result; done
+# System Call Basic (2개 모두 통과)
+for t in halt exit; do make tests/userprog/$t.result; done
+# File System Calls (통과한 것만)
+for t in create-{normal,empty,bound} open-{normal,twice,boundary,empty,missing} close-{normal,twice,bad-fd} read-{zero,stdout,bad-fd} write-{normal,boundary,zero,stdin,bad-fd}; do make tests/userprog/$t.result; done
+# Process Control (통과한 것만)
+for t in wait-bad-pid; do make tests/userprog/$t.result; done
+# Read-Only Executable (통과한 것만)
+for t in rox-simple; do make tests/userprog/$t.result; done
+
+# 통합 실행 (실제 통과한 28개 테스트만)
+for t in args-{none,single,multiple,many,dbl-space} halt exit create-{normal,empty,bound} open-{normal,twice,boundary,empty,missing} close-{normal,twice,bad-fd} read-{zero,stdout,bad-fd} write-{normal,boundary,zero,stdin,bad-fd} wait-bad-pid rox-simple; do make tests/userprog/$t.result; done
+
+
 
 
 함수명,변수명

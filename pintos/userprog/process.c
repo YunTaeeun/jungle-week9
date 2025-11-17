@@ -190,9 +190,6 @@ static void __do_fork(void* aux)
      * 않아야 합니다. */
 
     // 부모-자식 관계 설정
-    current->parent = parent;                                 // 자식이 부모 포인터 저장
-    list_push_back(&parent->children, &current->child_elem);  // 부모의 children 리스트에 자식 추가
-
     process_init();  // 프로세스 초기화
 
     /* Finally, switch to the newly created process. */
