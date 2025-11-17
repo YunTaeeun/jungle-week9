@@ -223,6 +223,7 @@ void thread_print_stats(void)
    우선순위 스케줄링은 과제 1-3의 목표입니다. */
 tid_t thread_create(const char *name, int priority, thread_func *function, void *aux)
 {
+    struct thread *cur_thread = thread_current();
     struct thread *t;
     tid_t tid;
 
@@ -250,7 +251,8 @@ tid_t thread_create(const char *name, int priority, thread_func *function, void 
     /* Add to run queue. */
     thread_unblock(t);
     /* 현재 스레드와 새로 생성된 스레드의 우선순위를 비교하여 양보가 필요하면 실행되도록  */
-    struct thread *cur_thread = thread_current();
+    list_push_back(&cur_thread->children, &t->child_elem);
+
     if (t->priority > cur_thread->priority)
     {
         thread_yield();  // 인터럽트 컨텍스트에서 스레드 양보가 필요하면 실행되도록
@@ -540,15 +542,11 @@ static void init_thread(struct thread *t, const char *name, int priority)
     t->waiting_lock = NULL;
     list_init(&t->holding_locks);
 #ifdef USERPROG
-    int i;
-    for (i = 0; i < MAX_FD; i++) t->fds[i] = NULL;
+    for (int i = 0; i < MAX_FD; i++) t->fds[i] = NULL;
     t->exec_file = NULL;
     t->exit_status = 0;
-    sema_init(&t->exit_sema, 0);  // exit_sema 초기화 (0으로 시작)
     sema_init(&t->wait_sema, 0);  // wait_sema 초기화 (0으로 시작)
     list_init(&t->children);      // children 리스트 초기화
-    t->parent = NULL;             // 부모 포인터 초기화
-    t->waited = false;            // waited 플래그 초기화
 #endif
 }
 

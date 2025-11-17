@@ -261,6 +261,11 @@ int process_exec(void* f_name)
  * 이 함수는 문제 2-2에서 구현될 예정입니다. 현재는 아무것도 하지 않습니다. */
 int process_wait(tid_t child_tid)
 {
+    /* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
+     * XXX:       to add infinite loop here before
+     * XXX:       implementing the process_wait. */
+    /* XXX: 힌트) process_wait(initd)를 호출하면 pintos가 종료되므로,
+     * XXX:       process_wait를 구현하기 전에 여기에 무한 루프를 추가하는 것을 권장합니다. */
     struct thread* current = thread_current();
     struct thread* child = NULL;
     struct list_elem* e;
@@ -280,16 +285,14 @@ int process_wait(tid_t child_tid)
     if (child == NULL) return -1;
 
     // 이미 wait된 자식이면 -1 반환
-    if (child->waited) return -1;
+    if (child->status == THREAD_BLOCKED) return -1;
 
     // 자식이 종료될 때까지 대기
-    child->waited = true;  // wait 플래그 설정
-    sema_down(&child->exit_sema);
+    sema_down(&child->wait_sema);
 
     // 자식의 종료 상태 반환
     int exit_status = child->exit_status;
     list_remove(&child->child_elem);  // children 리스트에서 제거
-
     return exit_status;
 }
 
@@ -304,8 +307,10 @@ void process_exit(void)
     /* TODO: 여기에 코드를 작성하세요.
      * TODO: 프로세스 종료 메시지를 구현하세요 (project2/process_termination.html 참조).
      * TODO: 여기에 프로세스 리소스 정리를 구현하는 것을 권장합니다. */
+    /* 대기 중인 부모 프로세스 깨우기 */
 
-    struct thread* t = thread_current();
+
+        struct thread* t = thread_current();
 
     // 파일 디스크립터 정리
     // 모든 열린 파일 닫기
@@ -331,10 +336,9 @@ void process_exit(void)
     // 예외로 종료된 경우(잘못된 메모리 접근 등)를 위해 여기서도 출력
     // exit_status가 0이면 sys_exit(0)을 통해 정상 종료된 것이므로 이미 출력됨
     // 하지만 예외로 종료된 경우 exit_status가 -1이거나 다른 값일 수 있음
-    printf("%s: exit(%d)\n", t->name, t->exit_status);
 
     // 대기 중인 부모 프로세스 깨우기
-    sema_up(&t->exit_sema);
+    sema_up(&t->wait_sema);
 
     process_cleanup();  // 프로세스 리소스 정리
 }
@@ -472,10 +476,30 @@ static bool load(const char* file_name, struct intr_frame* if_)
     bool success = false;                 // 성공 여부 플래그
     int i;                                // 반복문 인덱스
 
-    /* 인자 파싱을 위한 변수들 */
-    char fn_copy[LOADER_ARGS_LEN];  // file_name 복사본 (strtok_r이 문자열을 수정하므로)
-    char* argv[128];                // 인자 포인터 배열
-    int argc = 0;                   // 인자 개수
+    /* 인자 파싱을 위한 변수들 - 스택 오버플로우 방지를 위해 동적 할당 사용 */
+    char* fn_copy = NULL;
+    char** argv = NULL;
+    uintptr_t* argv_addrs = NULL;
+
+    fn_copy = palloc_get_page(0);
+    if (fn_copy == NULL) return false;
+
+    argv = palloc_get_page(0);  // 인자 포인터 배열 (동적 할당)
+    if (argv == NULL)
+    {
+        palloc_free_page(fn_copy);
+        return false;
+    }
+
+    argv_addrs = palloc_get_page(0);  // 각 문자열의 실제 주소를 저장할 배열
+    if (argv_addrs == NULL)
+    {
+        palloc_free_page(argv);
+        palloc_free_page(fn_copy);
+        return false;
+    }
+
+    int argc = 0;  // 인자 개수
     char *token, *save_ptr;
 
     /* file_name을 복사 (strtok_r이 원본을 수정하므로) */
@@ -506,6 +530,9 @@ static bool load(const char* file_name, struct intr_frame* if_)
         printf("load: %s: open failed\n", argv[0]);  // 에러 메시지 출력
         goto done;                                   // 종료 처리로 이동
     }
+
+    file_deny_write(file);  // 현재 연 파일에 대헤 수정 금지
+    t->exec_file = file;
 
     /* Read and verify executable header. */
     /* 실행 파일 헤더를 읽고 검증합니다. */
@@ -632,14 +659,18 @@ static bool load(const char* file_name, struct intr_frame* if_)
 
     // 1. 각 인자 문자열을 스택에 배치 (역순으로)
     // 왜 역순? argv[0]이 낮은 주소에 있어야 하므로, 나중에 push한 것이 먼저 나옴
-    uintptr_t argv_addrs[128];  // 각 문자열의 실제 주소를 저장할 배열
+    // argv_addrs는 이미 동적 할당됨
 
     for (i = argc - 1; i >= 0; i--)  // argc-1부터 0까지 역순
     {
         size_t len = strlen(argv[i]) + 1;  // 문자열 길이 + null terminator
         rsp -= len;                        // 스택 포인터를 문자열 크기만큼 내림
-        memcpy((void*)rsp, argv[i], len);  // 문자열을 스택에 복사
-        argv_addrs[i] = rsp;               // 이 문자열의 주소를 저장
+
+        // 사용자 가상 주소에 쓰기 위해 커널 가상 주소를 가져옴
+        void* kpage = pml4_get_page(t->pml4, (void*)rsp);
+        if (kpage == NULL) goto done;  // 페이지가 없으면 오류
+        memcpy(kpage, argv[i], len);  // 커널 가상 주소를 통해 문자열을 스택에 복사
+        argv_addrs[i] = rsp;          // 이 문자열의 주소를 저장
     }
     // 예: argc=2, argv[0]="args-single", argv[1]="onearg"
     //     먼저 argv[1] "onearg\0"를 스택에 push
@@ -654,14 +685,18 @@ static bool load(const char* file_name, struct intr_frame* if_)
     // 3. argv[argc] = NULL 배치
     // C 표준: argv 배열은 NULL 포인터로 끝나야 함
     rsp -= sizeof(char*);  // 포인터 크기(8바이트)만큼 스택 내림
-    *(char**)rsp = NULL;   // NULL 포인터 저장
+    void* kpage = pml4_get_page(t->pml4, (void*)rsp);
+    if (kpage == NULL) goto done;
+    *(char**)kpage = NULL;  // NULL 포인터 저장
 
     // 4. argv 배열 (포인터들) 배치 (역순으로)
     // argv[argc-1], argv[argc-2], ..., argv[0] 순서로 push
     for (i = argc - 1; i >= 0; i--)
     {
-        rsp -= sizeof(char*);              // 포인터 크기만큼 스택 내림
-        *(uintptr_t*)rsp = argv_addrs[i];  // 문자열 주소를 스택에 저장
+        rsp -= sizeof(char*);  // 포인터 크기만큼 스택 내림
+        kpage = pml4_get_page(t->pml4, (void*)rsp);
+        if (kpage == NULL) goto done;
+        *(uintptr_t*)kpage = argv_addrs[i];  // 문자열 주소를 스택에 저장
     }
     // 예: 먼저 argv[1]의 주소를 push, 그 다음 argv[0]의 주소를 push
     // 결과: 스택에서 위에서 아래로 argv[0], argv[1], ... 순서로 배치됨
@@ -674,7 +709,9 @@ static bool load(const char* file_name, struct intr_frame* if_)
     // 함수 호출 규약: 스택에는 리턴 주소가 있어야 함
     // main()은 실제로 return하지 않지만, 구조상 필요
     rsp -= sizeof(void*);  // 포인터 크기만큼 스택 내림
-    *(void**)rsp = NULL;   // NULL을 리턴 주소로 (실제로는 사용 안 됨)
+    kpage = pml4_get_page(t->pml4, (void*)rsp);
+    if (kpage == NULL) goto done;
+    *(void**)kpage = NULL;  // NULL을 리턴 주소로 (실제로는 사용 안 됨)
 
     // 7. 레지스터 설정
     // x86-64 호출 규약: 첫 6개 인자는 레지스터로 전달
@@ -701,12 +738,25 @@ static bool load(const char* file_name, struct intr_frame* if_)
      */
 
     success = true;  // 성공 플래그 설정
-
+    // 성공한 경우 할당한 메모리 해제
+    palloc_free_page(argv_addrs);
+    palloc_free_page(argv);
+    palloc_free_page(fn_copy);
 done:
     /* We arrive here whether the load is successful or not. */
-    /* 로드가 성공했든 실패했든 여기에 도달합니다. */
-    file_close(file);  // 파일 닫기
-    return success;    // 성공 여부 반환
+    if (!success)
+    {
+        // 실패 시 할당한 메모리 해제
+        if (argv_addrs != NULL) palloc_free_page(argv_addrs);
+        if (argv != NULL) palloc_free_page(argv);
+        if (fn_copy != NULL) palloc_free_page(fn_copy);
+        if (file != NULL)
+        {
+            file_close(file);  // ← 실패한 경우에만 닫음!
+        }
+    }
+    // 성공한 경우 파일은 열린 채로 유지!
+    return success;
 }
 
 /* Checks whether PHDR describes a valid, loadable segment in
