@@ -30,6 +30,13 @@ static bool load(const char* file_name, struct intr_frame* if_);  // ELF 파일 
 static void initd(void* f_name);  // 첫 번째 사용자 프로세스 실행 함수
 static void __do_fork(void*);     // fork 실행 함수
 
+struct fork_data
+{
+    struct thread* parent;
+    struct intr_frame* parent_if;
+    struct semaphore child_create;
+    bool success;
+};
 /* General process initializer for initd and other process. */
 /* initd 및 다른 프로세스를 위한 일반 프로세스 초기화 함수 */
 static void process_init(void)
@@ -58,7 +65,7 @@ tid_t process_create_initd(const char* file_name)
     /* Create a new thread to execute FILE_NAME. */
     /* FILE_NAME을 실행할 새 스레드를 생성합니다. */
     char thread_name[16];
-    strlcpy(thread_name, fn_copy, sizeof thread_name);
+    strlcpy(thread_name, file_name, sizeof thread_name);
     char* space = strchr(thread_name, ' ');
     if (space != NULL) *space = '\0';
 
@@ -91,10 +98,35 @@ tid_t process_fork(const char* name, struct intr_frame* if_ UNUSED)
 {
     /* Clone current thread to new thread.*/
     /* 현재 스레드를 새 스레드로 복제합니다. */
-    return thread_create(
-        name,  // 새 스레드 이름
-        PRI_DEFAULT, __do_fork,
-        thread_current());  // 기본 우선순위로 __do_fork 함수 실행, 현재 스레드를 인자로 전달
+    /* 부모 스레드와 사용자 영역 컨텍스트를 함께 전달하기 위한 구조체 */
+    struct fork_data* fork_data = palloc_get_page(0);
+
+    if (fork_data == NULL) return TID_ERROR;
+
+    fork_data->parent = thread_current();
+    fork_data->parent_if = if_;
+    sema_init(&fork_data->child_create, 0);
+    fork_data->success = false;
+
+    tid_t child_tid = thread_create(name,  // 새 스레드 이름
+                                    PRI_DEFAULT, __do_fork,
+                                    fork_data);  // 부모 스레드와 사용자 영역 컨텍스트를 함께 전달
+
+    if (child_tid == TID_ERROR)
+    {
+        return TID_ERROR;
+    }
+
+    sema_down(&fork_data->child_create);
+
+    /* 복제 성공 여부를 판단한다 */
+    if (!fork_data->success)
+    {
+        return TID_ERROR;
+    }
+
+    /* 자식 프로세스 생성 결과를 돌려준다. */
+    return child_tid;
 }
 
 #ifndef VM
@@ -112,21 +144,36 @@ static bool duplicate_pte(uint64_t* pte, void* va, void* aux)
 
     /* 1. TODO: If the parent_page is kernel page, then return immediately. */
     /* 1. TODO: parent_page가 커널 페이지이면 즉시 반환합니다. */
+    if (!is_user_pte(pte))
+    {
+        return true;
+    }
 
     /* 2. Resolve VA from the parent's page map level 4. */
     /* 2. 부모의 페이지 맵 레벨 4에서 VA를 해석합니다. */
-    parent_page = pml4_get_page(
-        parent->pml4, va);  // 부모의 페이지 테이블에서 가상 주소에 해당하는 물리 페이지 가져오기
+    // 부모의 페이지 테이블에서 가상 주소에 해당하는 물리 페이지 가져오기
+    parent_page = pml4_get_page(parent->pml4, va);
+    if (parent_page == NULL)
+    {
+        return false;
+    }
 
     /* 3. TODO: Allocate new PAL_USER page for the child and set result to
      *    TODO: NEWPAGE. */
     /* 3. TODO: 자식을 위한 새로운 PAL_USER 페이지를 할당하고 결과를 NEWPAGE에 설정합니다. */
+    newpage = palloc_get_page(PAL_USER);
+    if (newpage == NULL)
+    {
+        return false;
+    }
 
     /* 4. TODO: Duplicate parent's page to the new page and
      *    TODO: check whether parent's page is writable or not (set WRITABLE
      *    TODO: according to the result). */
     /* 4. TODO: 부모의 페이지를 새 페이지로 복제하고,
      *    TODO: 부모의 페이지가 쓰기 가능한지 확인합니다 (결과에 따라 WRITABLE 설정). */
+    memcpy(newpage, parent_page, PGSIZE);
+    writable = is_writable(pte);  // PTE_W 플래그 확인
 
     /* 5. Add new page to child's page table at address VA with WRITABLE
      *    permission. */
@@ -135,6 +182,8 @@ static bool duplicate_pte(uint64_t* pte, void* va, void* aux)
     {  // 자식의 페이지 테이블에 페이지 매핑 시도
         /* 6. TODO: if fail to insert page, do error handling. */
         /* 6. TODO: 페이지 삽입에 실패하면 에러 처리를 수행합니다. */
+        palloc_free_page(newpage);
+        return false;
     }
     return true;  // 성공 반환
 }
@@ -149,13 +198,14 @@ static bool duplicate_pte(uint64_t* pte, void* va, void* aux)
  *       즉, process_fork의 두 번째 인자를 이 함수에 전달해야 합니다. */
 static void __do_fork(void* aux)
 {
-    struct intr_frame if_;                        // 인터럽트 프레임 구조체 (자식용)
-    struct thread* parent = (struct thread*)aux;  // aux에서 부모 스레드 가져오기
-    struct thread* current = thread_current();    // 현재 스레드(자식) 가져오기
+    struct intr_frame if_;  // 인터럽트 프레임 구조체 (자식용)
+    struct fork_data* fork_data = (struct fork_data*)aux;
+    struct thread* parent = fork_data->parent;  // aux에서 부모 스레드 가져오기
+    struct thread* current = thread_current();  // 현재 스레드(자식) 가져오기
     /* TODO: somehow pass the parent_if. (i.e. process_fork()'s if_) */
     /* TODO: 어떤 식으로든 parent_if를 전달합니다. (즉, process_fork()의 if_) */
-    struct intr_frame* parent_if;  // 부모의 인터럽트 프레임 포인터 (초기화 필요)
-    bool succ = true;              // 성공 여부 플래그
+    struct intr_frame* parent_if = fork_data->parent_if;  // 부모의 인터럽트 프레임 포인터
+    bool succ = true;                                     // 성공 여부 플래그
 
     /* 1. Read the cpu context to local stack. */
     /* 1. CPU 컨텍스트를 로컬 스택으로 읽어옵니다. */
@@ -189,15 +239,51 @@ static void __do_fork(void* aux)
      * TODO:       부모는 이 함수가 부모의 리소스를 성공적으로 복제할 때까지 fork()에서 반환하지
      * 않아야 합니다. */
 
+    /* 파일 디스크립터 복제 */
+    for (int i = 0; i < MAX_FD; i++)
+    {
+        if (parent->fds[i] != NULL)
+        {
+            current->fds[i] = file_duplicate(parent->fds[i]);
+            if (current->fds[i] == NULL)
+            {
+                /* file_duplicate 실패 시 이미 복제된 파일들 정리 */
+                for (int j = 0; j < i; j++)
+                {
+                    if (current->fds[j] != NULL)
+                    {
+                        file_close(current->fds[j]);
+                        current->fds[j] = NULL;
+                    }
+                }
+                succ = false;
+                goto error;
+            }
+        }
+        else
+        {
+            current->fds[i] = NULL;
+        }
+    }
+
     // 부모-자식 관계 설정
     process_init();  // 프로세스 초기화
 
     /* Finally, switch to the newly created process. */
     /* 마지막으로, 새로 생성된 프로세스로 전환합니다. */
-    if (succ)           // 성공한 경우
+    if (succ)
+    {  // 성공한 경우
+        if_.R.rax = 0;
+        fork_data->success = true;
+        sema_up(&fork_data->child_create);  // 부모에게 완료 신호
+        palloc_free_page(fork_data);        // fork_data 메모리 해제
         do_iret(&if_);  // 인터럽트 복귀를 통해 새 프로세스 실행 시작
+    }
 error:
-    thread_exit();  // 스레드 종료
+    fork_data->success = false;
+    sema_up(&fork_data->child_create);  // 부모에게 완료 신호
+    palloc_free_page(fork_data);        // fork_data 메모리 해제
+    thread_exit();                      // 스레드 종료
 }
 
 /* Switch the current execution context to the f_name.
@@ -332,6 +418,13 @@ void process_exit(void)
     // 예외로 종료된 경우(잘못된 메모리 접근 등)를 위해 여기서도 출력
     // exit_status가 0이면 sys_exit(0)을 통해 정상 종료된 것이므로 이미 출력됨
     // 하지만 예외로 종료된 경우 exit_status가 -1이거나 다른 값일 수 있음
+    // 프로세스 종료 메시지 출력
+    // 문서: "Do not print these messages when a kernel thread that is not a user process
+    // terminates" 커널 스레드는 pml4가 NULL이므로 체크
+    if (t->pml4 != NULL)  // 유저 프로세스인 경우에만 출력
+    {
+        printf("%s: exit(%d)\n", t->name, t->exit_status);
+    }
 
     // 대기 중인 부모 프로세스 깨우기
     sema_up(&t->wait_sema);
