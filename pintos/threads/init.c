@@ -40,7 +40,7 @@
 #endif
 
 /* Page-map-level-4 with kernel mappings only. */
-uint64_t* base_pml4;
+uint64_t *base_pml4;
 
 #ifdef FILESYS
 /* -f: Format the file system? */
@@ -55,9 +55,9 @@ bool thread_tests;
 static void bss_init(void);
 static void paging_init(uint64_t mem_end);
 
-static char** read_command_line(void);
-static char** parse_options(char** argv);
-static void run_actions(char** argv);
+static char **read_command_line(void);
+static char **parse_options(char **argv);
+static void run_actions(char **argv);
 static void usage(void);
 
 static void print_stats(void);
@@ -68,77 +68,79 @@ int main(void) NO_RETURN;
 /* Pintos main program. */
 int main(void)
 {
-    uint64_t mem_end;
-    char** argv;
+	uint64_t mem_end;
+	char **argv;
 
-    /* Clear BSS and get machine's RAM size. */
-    bss_init();
+	/* Clear BSS and get machine's RAM size. */
+	bss_init();
 
-    /* Break command line into arguments and parse options. */
-    argv = read_command_line();
-    argv = parse_options(argv);  // 옵션 아닌 부분들 argv에 반환 ["run", "args-single onearg", NULL]
+	/* Break command line into arguments and parse options. */
+	argv = read_command_line();
+	argv = parse_options(argv); // 옵션 아닌 부분들 argv에 반환 ["run",
+				    // "args-single onearg", NULL]
 
-    /* Initialize ourselves as a thread so we can use locks,
-       then enable console locking. */
-    thread_init();
-    console_init();
+	/* Initialize ourselves as a thread so we can use locks,
+	   then enable console locking. */
+	thread_init();
+	console_init();
 
-    /* Initialize memory system. */
-    mem_end = palloc_init();
-    malloc_init();
-    paging_init(mem_end);
+	/* Initialize memory system. */
+	mem_end = palloc_init();
+	malloc_init();
+	paging_init(mem_end);
 
 #ifdef USERPROG
-    tss_init();
-    gdt_init();
+	tss_init();
+	gdt_init();
 #endif
 
-    /* Initialize interrupt handlers. */
-    intr_init();
-    timer_init();
-    kbd_init();
-    input_init();
+	/* Initialize interrupt handlers. */
+	intr_init();
+	timer_init();
+	kbd_init();
+	input_init();
 #ifdef USERPROG
-    exception_init();
-    syscall_init();
+	exception_init();
+	syscall_init();
 #endif
-    /* Start thread scheduler and enable interrupts. */
-    thread_start();
-    serial_init_queue();
-    timer_calibrate();
+	/* Start thread scheduler and enable interrupts. */
+	thread_start();
+	serial_init_queue();
+	timer_calibrate();
 
 #ifdef FILESYS
-    /* Initialize file system. */
-    disk_init();
-    filesys_init(format_filesys);
+	/* Initialize file system. */
+	disk_init();
+	filesys_init(format_filesys);
 #endif
 
 #ifdef VM
-    vm_init();
+	vm_init();
 #endif
 
-    printf("Boot complete.\n");
+	printf("Boot complete.\n");
 
 	/* Run actions specified on kernel command line. */
 	// 위에서 parse 까지 완료된 명령어 run_actions 함수로 넘김
-	run_actions (argv);
+	run_actions(argv);
 
-    /* Finish up. */
-    if (power_off_when_done) power_off();
-    thread_exit();
+	/* Finish up. */
+	if (power_off_when_done)
+		power_off();
+	thread_exit();
 }
 
 /* Clear BSS */
 static void bss_init(void)
 {
-    /* The "BSS" is a segment that should be initialized to zeros.
-       It isn't actually stored on disk or zeroed by the kernel
-       loader, so we have to zero it ourselves.
+	/* The "BSS" is a segment that should be initialized to zeros.
+	   It isn't actually stored on disk or zeroed by the kernel
+	   loader, so we have to zero it ourselves.
 
-       The start and end of the BSS segment is recorded by the
-       linker as _start_bss and _end_bss.  See kernel.lds. */
-    extern char _start_bss, _end_bss;
-    memset(&_start_bss, 0, &_end_bss - &_start_bss);
+	   The start and end of the BSS segment is recorded by the
+	   linker as _start_bss and _end_bss.  See kernel.lds. */
+	extern char _start_bss, _end_bss;
+	memset(&_start_bss, 0, &_end_bss - &_start_bss);
 }
 
 /* Populates the page table with the kernel virtual mapping,
@@ -146,211 +148,224 @@ static void bss_init(void)
  * Points base_pml4 to the pml4 it creates. */
 static void paging_init(uint64_t mem_end)
 {
-    uint64_t *pml4, *pte;
-    int perm;
-    pml4 = base_pml4 = palloc_get_page(PAL_ASSERT | PAL_ZERO);
+	uint64_t *pml4, *pte;
+	int perm;
+	pml4 = base_pml4 = palloc_get_page(PAL_ASSERT | PAL_ZERO);
 
-    extern char start, _end_kernel_text;
-    // Maps physical address [0 ~ mem_end] to
-    //   [LOADER_KERN_BASE ~ LOADER_KERN_BASE + mem_end].
-    for (uint64_t pa = 0; pa < mem_end; pa += PGSIZE)
-    {
-        uint64_t va = (uint64_t)ptov(pa);
+	extern char start, _end_kernel_text;
+	// Maps physical address [0 ~ mem_end] to
+	//   [LOADER_KERN_BASE ~ LOADER_KERN_BASE + mem_end].
+	for (uint64_t pa = 0; pa < mem_end; pa += PGSIZE) {
+		uint64_t va = (uint64_t)ptov(pa);
 
-        perm = PTE_P | PTE_W;
-        if ((uint64_t)&start <= va && va < (uint64_t)&_end_kernel_text) perm &= ~PTE_W;
+		perm = PTE_P | PTE_W;
+		if ((uint64_t)&start <= va && va < (uint64_t)&_end_kernel_text)
+			perm &= ~PTE_W;
 
-        if ((pte = pml4e_walk(pml4, va, 1)) != NULL) *pte = pa | perm;
-    }
+		if ((pte = pml4e_walk(pml4, va, 1)) != NULL)
+			*pte = pa | perm;
+	}
 
-    // reload cr3
-    pml4_activate(0);
+	// reload cr3
+	pml4_activate(0);
 }
 
 /* 커널 명령어를 띄어쓰기 기준으로 잘라서 argv-like 배열에 넣는다 */
-static char** read_command_line(void)
+static char **read_command_line(void)
 {
-    static char* argv[LOADER_ARGS_LEN / 2 + 1];
-    char *p, *end;
-    int argc;
-    int i;
+	static char *argv[LOADER_ARGS_LEN / 2 + 1];
+	char *p, *end;
+	int argc;
+	int i;
 
-    argc = *(uint32_t*)ptov(LOADER_ARG_CNT);
-    p = ptov(LOADER_ARGS);
-    end = p + LOADER_ARGS_LEN;
-    for (i = 0; i < argc; i++)
-    {
-        if (p >= end) PANIC("command line arguments overflow");
+	argc = *(uint32_t *)ptov(LOADER_ARG_CNT);
+	p = ptov(LOADER_ARGS);
+	end = p + LOADER_ARGS_LEN;
+	for (i = 0; i < argc; i++) {
+		if (p >= end)
+			PANIC("command line arguments overflow");
 
-        argv[i] = p;
-        p += strnlen(p, end - p) + 1;
-    }
-    argv[argc] = NULL;
+		argv[i] = p;
+		p += strnlen(p, end - p) + 1;
+	}
+	argv[argc] = NULL;
 
-    /* Print kernel command line. */
-    printf("Kernel command line:");
-    for (i = 0; i < argc; i++)
-        if (strchr(argv[i], ' ') == NULL)
-            printf(" %s", argv[i]);
-        else
-            printf(" '%s'", argv[i]);
-    printf("\n");
+	/* Print kernel command line. */
+	printf("Kernel command line:");
+	for (i = 0; i < argc; i++)
+		if (strchr(argv[i], ' ') == NULL)
+			printf(" %s", argv[i]);
+		else
+			printf(" '%s'", argv[i]);
+	printf("\n");
 
-    return argv;
+	return argv;
 }
 
 /* 커널의 옵션을 파싱하는 함수 */
-static char** parse_options(char** argv)
+static char **parse_options(char **argv)
 {
-    for (; *argv != NULL && **argv == '-'; argv++)
-    {
-        char* save_ptr;
-        char* name = strtok_r(*argv, "=", &save_ptr);
-        char* value = strtok_r(NULL, "", &save_ptr);
+	for (; *argv != NULL && **argv == '-'; argv++) {
+		char *save_ptr;
+		char *name = strtok_r(*argv, "=", &save_ptr);
+		char *value = strtok_r(NULL, "", &save_ptr);
 
-        if (!strcmp(name, "-h"))
-            usage();
-        else if (!strcmp(name, "-q"))
-            power_off_when_done = true;
+		if (!strcmp(name, "-h"))
+			usage();
+		else if (!strcmp(name, "-q"))
+			power_off_when_done = true;
 #ifdef FILESYS
-        else if (!strcmp(name, "-f"))
-            format_filesys = true;
+		else if (!strcmp(name, "-f"))
+			format_filesys = true;
 #endif
-        else if (!strcmp(name, "-rs"))
-            random_init(atoi(value));
-        else if (!strcmp(name, "-mlfqs"))
-            thread_mlfqs = true;
+		else if (!strcmp(name, "-rs"))
+			random_init(atoi(value));
+		else if (!strcmp(name, "-mlfqs"))
+			thread_mlfqs = true;
 #ifdef USERPROG
-        else if (!strcmp(name, "-ul"))
-            user_page_limit = atoi(value);
-        else if (!strcmp(name, "-threads-tests"))
-            thread_tests = true;
+		else if (!strcmp(name, "-ul"))
+			user_page_limit = atoi(value);
+		else if (!strcmp(name, "-threads-tests"))
+			thread_tests = true;
 #endif
-        else
-            PANIC("unknown option `%s' (use -h for help)", name);
-    }
+		else
+			PANIC("unknown option `%s' (use -h for help)", name);
+	}
 
-    return argv;
+	return argv;
 }
 
 /* Runs the task specified in ARGV[1]. */
 // 10주차
-static void
-run_task (char **argv) {
+static void run_task(char **argv)
+{
 	// argv[1] -> 프로그램 이름임
 	const char *task = argv[1];
 
-    // printf("[DEBUG] run_task CALLED\n");
-    // printf("[run_task] argv[1]: %s\n", argv[1]);  // argv[1] = args-single onearg
+	// printf("[DEBUG] run_task CALLED\n");
+	// printf("[run_task] argv[1]: %s\n",
+	//        argv[1]); // argv[1] = args-single onearg
 
 #ifdef USERPROG
-// thread_tests 는 기본값이 False 임
-	if (thread_tests){
-		run_test (task);
+	// project1: tests 배열에서 검색
+	if (thread_tests) {
+		run_test(task);
 	} else {
-		// 10주차 fork 시켜놓고 원래 프로그램이 죽기 전에 fork 된 프로그램이 돌아가게 원래 프로그램이 기다려야 한다
-		process_wait (process_create_initd (task));
+		// project2: 유저 프로그램 실행
+		// process.c에서 유저 프로그램을 ELF파일로 로드하여 실행한다.
+		// process_create_initd() > initd() > process_exec() > load() >
+		// do_iret()
+		// printf("===> run task: %s", task);
+		process_wait(process_create_initd(task));
 	}
 #else
-    run_test(task);
+	run_test(task);
 #endif
 
-    printf("Execution of '%s' complete.\n", task);
+	printf("Execution of '%s' complete.\n", task);
 }
 
-static void run_actions(char** argv)
+static void run_actions(char **argv)
 {
-    // printf("[run_actions] run_actions CALLED\n");
+	// printf("[run_actions] run_actions CALLED\n");
 
-    // 모든 argv 출력
-    // for (int i = 0; argv[i] != NULL; i++)
-    // {
-    //     printf("[run_actions] argv[%d]: %s\n", i, argv[i]);
-    // }
+	// 모든 argv 출력
+	// for (int i = 0; argv[i] != NULL; i++)
+	// {
+	//     printf("[run_actions] argv[%d]: %s\n", i, argv[i]);
+	// }
 
-    /* An action. */
-    struct action
-    {
-        char* name;                    /* Action name. */
-        int argc;                      /* # of args, including action name. */
-        void (*function)(char** argv); /* Function to execute action. */
-    };
+	/* An action. */
+	struct action {
+		char *name; /* Action name. */
+		int argc;   /* # of args, including action name. */
+		void (*function)(char **argv); /* Function to execute action. */
+	};
 
 	/* Table of supported actions. */
-	// 1. 사용자가 입력한 명령어 argv[0]이 run이 맞는지, 2. 인자 2개 들어온거 맞는지 (argv[0]= run, argv[1]= '실행할 프로그램 문자열' -> 이 2조건이 만족되면, run_task 실행)
+	// 1. 사용자가 입력한 명령어 argv[0]이 run이 맞는지, 2. 인자 2개
+	// 들어온거 맞는지 (argv[0]= run, argv[1]= '실행할 프로그램 문자열' ->
+	// 이 2조건이 만족되면, run_task 실행)
 	static const struct action actions[] = {
-		{"run", 2, run_task},
+	    {"run", 2, run_task},
 #ifdef FILESYS
-        {"ls", 1, fsutil_ls},   {"cat", 2, fsutil_cat}, {"rm", 2, fsutil_rm},
-        {"put", 2, fsutil_put}, {"get", 2, fsutil_get},
+	    {"ls", 1, fsutil_ls},   {"cat", 2, fsutil_cat},
+	    {"rm", 2, fsutil_rm},   {"put", 2, fsutil_put},
+	    {"get", 2, fsutil_get},
 #endif
-        {NULL, 0, NULL},
-    };
+	    {NULL, 0, NULL},
+	};
 
-    while (*argv != NULL)
-    {
-        const struct action* a;
-        int i;
+	while (*argv != NULL) {
+		const struct action *a;
+		int i;
 
-        // printf("[run_actions] Processing action: %s\n", *argv);
+		// printf("[run_actions] Processing action: %s\n", *argv);
 
-        /* Find action name. */
-        for (a = actions;; a++)
-            if (a->name == NULL)
-                PANIC("unknown action `%s' (use -h for help)", *argv);
-            else if (!strcmp(*argv, a->name))
-                break;
+		/* Find action name. */
+		for (a = actions;; a++)
+			if (a->name == NULL)
+				PANIC("unknown action `%s' (use -h for help)",
+				      *argv);
+			else if (!strcmp(*argv, a->name))
+				break;
 
-        // printf("[run_actions] Found action '%s', argc=%d\n", a->name, a->argc);
+		// printf("[run_actions] Found action '%s', argc=%d\n", a->name,
+		// a->argc);
 
-        /* Check for required arguments. */
-        for (i = 1; i < a->argc; i++)
-            if (argv[i] == NULL) PANIC("action `%s' requires %d argument(s)", *argv, a->argc - 1);
+		/* Check for required arguments. */
+		for (i = 1; i < a->argc; i++)
+			if (argv[i] == NULL)
+				PANIC("action `%s' requires %d argument(s)",
+				      *argv, a->argc - 1);
 
-        /* Invoke action and advance. */
-        // printf("[run_actions] Calling function for '%s'\n", a->name);
-        a->function(argv);
-        // printf("[run_actions] Finished '%s', advancing by %d\n", a->name, a->argc);
-        argv += a->argc;
-    }
+		/* Invoke action and advance. */
+		// printf("[run_actions] Calling function for '%s'\n", a->name);
+		a->function(argv);
+		// printf("[run_actions] Finished '%s', advancing by %d\n",
+		// a->name, a->argc);
+		argv += a->argc;
+	}
 
-    // ⭐ 디버깅용 코드
-    // printf("[run_actions] run_action END\n");
+	// ⭐ 디버깅용 코드
+	// printf("[run_actions] run_action END\n");
 }
 
 /* Prints a kernel command line help message and powers off the
    machine. */
 static void usage(void)
 {
-    printf(
-        "\nCommand line syntax: [OPTION...] [ACTION...]\n"
-        "Options must precede actions.\n"
-        "Actions are executed in the order specified.\n"
-        "\nAvailable actions:\n"
+	printf(
+	    "\nCommand line syntax: [OPTION...] [ACTION...]\n"
+	    "Options must precede actions.\n"
+	    "Actions are executed in the order specified.\n"
+	    "\nAvailable actions:\n"
 #ifdef USERPROG
-        "  run 'PROG [ARG...]' Run PROG and wait for it to complete.\n"
+	    "  run 'PROG [ARG...]' Run PROG and wait for it to complete.\n"
 #else
-        "  run TEST           Run TEST.\n"
+	    "  run TEST           Run TEST.\n"
 #endif
 #ifdef FILESYS
-        "  ls                 List files in the root directory.\n"
-        "  cat FILE           Print FILE to the console.\n"
-        "  rm FILE            Delete FILE.\n"
-        "Use these actions indirectly via `pintos' -g and -p options:\n"
-        "  put FILE           Put FILE into file system from scratch disk.\n"
-        "  get FILE           Get FILE from file system into scratch disk.\n"
+	    "  ls                 List files in the root directory.\n"
+	    "  cat FILE           Print FILE to the console.\n"
+	    "  rm FILE            Delete FILE.\n"
+	    "Use these actions indirectly via `pintos' -g and -p options:\n"
+	    "  put FILE           Put FILE into file system from scratch "
+	    "disk.\n"
+	    "  get FILE           Get FILE from file system into scratch "
+	    "disk.\n"
 #endif
-        "\nOptions:\n"
-        "  -h                 Print this help message and power off.\n"
-        "  -q                 Power off VM after actions or on panic.\n"
-        "  -f                 Format file system disk during startup.\n"
-        "  -rs=SEED           Set random number seed to SEED.\n"
-        "  -mlfqs             Use multi-level feedback queue scheduler.\n"
+	    "\nOptions:\n"
+	    "  -h                 Print this help message and power off.\n"
+	    "  -q                 Power off VM after actions or on panic.\n"
+	    "  -f                 Format file system disk during startup.\n"
+	    "  -rs=SEED           Set random number seed to SEED.\n"
+	    "  -mlfqs             Use multi-level feedback queue scheduler.\n"
 #ifdef USERPROG
-        "  -ul=COUNT          Limit user memory to COUNT pages.\n"
+	    "  -ul=COUNT          Limit user memory to COUNT pages.\n"
 #endif
-    );
-    power_off();
+	);
+	power_off();
 }
 
 /* Powers down the machine we're running on,
@@ -358,27 +373,28 @@ static void usage(void)
 void power_off(void)
 {
 #ifdef FILESYS
-    filesys_done();
+	filesys_done();
 #endif
 
-    print_stats();
+	print_stats();
 
-    printf("Powering off...\n");
-    outw(0x604, 0x2000); /* Poweroff command for qemu */
-    for (;;);
+	printf("Powering off...\n");
+	outw(0x604, 0x2000); /* Poweroff command for qemu */
+	for (;;)
+		;
 }
 
 /* Print statistics about Pintos execution. */
 static void print_stats(void)
 {
-    timer_print_stats();
-    thread_print_stats();
+	timer_print_stats();
+	thread_print_stats();
 #ifdef FILESYS
-    disk_print_stats();
+	disk_print_stats();
 #endif
-    console_print_stats();
-    kbd_print_stats();
+	console_print_stats();
+	kbd_print_stats();
 #ifdef USERPROG
-    exception_print_stats();
+	exception_print_stats();
 #endif
 }

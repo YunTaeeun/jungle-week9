@@ -29,6 +29,7 @@ static void process_cleanup(void);
 static bool load(const char *file_name, struct intr_frame *if_);
 static void initd(void *f_name);
 static void __do_fork(void *);
+struct thread *find_child(tid_t);
 
 /* initd와 다른 프로세스들을 위한 일반 프로세스 초기화 함수입니다. */
 static void process_init(void)
@@ -44,6 +45,8 @@ static void process_init(void)
 // filename 은 'programname args ~' 이런식
 tid_t process_create_initd(const char *file_name)
 {
+	// printf("===> process_create_initd started.\n");
+
 	static bool sema_initialized = false;
 	if (!sema_initialized) {
 		sema_init(&temporary, 0);
@@ -65,11 +68,14 @@ tid_t process_create_initd(const char *file_name)
 	strtok_r(file_name, " ", &ptr);
 
 	/* Create a new thread to execute FILE_NAME. */
-	// 프로그램을 실행할 쓰레드를 하나 만들고 , 그 쓰레드는 바로 initd 실행
-	// (fn_copy를 인자로 받아서 -> fn_copy에는 programname args 다 들어있음)
+	// 프로그램을 실행할 쓰레드를 하나 만들고 , 그 쓰레드는 바로 initd
+	// 실행 (fn_copy를 인자로 받아서 -> fn_copy에는 programname args 다
+	// 들어있음)
 	tid = thread_create(file_name, PRI_DEFAULT, initd, fn_copy);
 	if (tid == TID_ERROR)
 		palloc_free_page(fn_copy);
+	// printf("===> process_create_initd ended.\n");
+
 	return tid;
 }
 
@@ -101,6 +107,8 @@ static void initd(void *f_name)
 
 	// 여기서 process_exec 실행 -> 자기 자신(쓰레드) 를 사용자 프로그램으로
 	// 변환
+	// printf("===> initd.\n");
+
 	if (process_exec(f_name) < 0)
 		PANIC("Fail to launch initd\n");
 	NOT_REACHED();
@@ -118,6 +126,7 @@ struct fork_args {
  * 스레드를 생성할 수 없으면 TID_ERROR를 반환합니다. */
 tid_t process_fork(const char *name, struct intr_frame *if_ UNUSED)
 {
+	// printf("===> process_fork called.\n");
 	/* fork인자용 구조체에 데이터를 담는다 */
 	struct fork_args args = {
 	    .parent = thread_current(), .parent_if = if_, .success = false};
@@ -140,6 +149,8 @@ tid_t process_fork(const char *name, struct intr_frame *if_ UNUSED)
 	}
 
 	/* 자식 프로세스 생성 결과를 돌려준다. */
+	// printf("===> process_fork finished: %d.\n", child_tid);
+
 	return child_tid;
 }
 
@@ -188,7 +199,7 @@ static bool duplicate_pte(uint64_t *pte, void *va, void *aux)
 /* 부모의 실행 컨텍스트를 복사하는 스레드 함수 */
 static void __do_fork(void *aux)
 {
-	struct fork_args *args = (struct fork_agrs *)aux;
+	struct fork_args *args = (struct fork_args *)aux;
 	struct intr_frame if_;
 	struct thread *parent = args->parent;
 	struct thread *current = thread_current();
@@ -230,6 +241,11 @@ static void __do_fork(void *aux)
 
 	/* 수행 성공을 저장 */
 	args->success = true;
+
+	/* 부모 스레드, 자식 리스트 저장 */
+	current->parent = parent;
+	list_push_back(&parent->child_list, &current->child_elem);
+
 	/* 부모 프로세스에게 종료를 알린다 */
 	sema_up(&args->child_create);
 
@@ -267,6 +283,8 @@ int process_exec(void *f_name)
 	process_cleanup();
 
 	/* 3. load() 함수를 호출하여 새 프로그램을 메모리에 적재. */
+	printf("===> load.\n");
+
 	success = load(file_name, &_if);
 
 	/* 4. f_name은 process_create_initd에서 할당(palloc)한 복사본이므로,
@@ -280,37 +298,99 @@ int process_exec(void *f_name)
 	 * CPU 레지스터가 _if에 설정된 값(rip, rsp 등)으로 갱신되며,
 	 * 유저 프로그램의 진입점(rip)에서 실행을 시작.
 	 * 이 함수는 커널로 돌아오지 않음. */
+	printf("===> do_iret.\n");
+
 	do_iret(&_if);
 	NOT_REACHED();
+}
+
+struct thread *find_child(tid_t target_tid)
+{
+	struct list_elem *e;
+	struct thread *child = NULL;
+	for (e = list_begin(&thread_current()->child_list);
+	     e != list_end(&thread_current()->child_list); e = list_next(e)) {
+		child = list_entry(e, struct thread, elem);
+		if (child->tid == target_tid) {
+			return child;
+		}
+	}
+
+	return NULL;
 }
 
 /* 스레드 TID가 종료될 때까지 기다리고 종료 상태를 반환합니다. 만약
  * 커널에 의해 종료되었다면 (즉, 예외로 인해 죽임당함), -1을 반환합니다.
  * TID가 유효하지 않거나, 호출 프로세스의 자식이 아니거나,
  * 주어진 TID에 대해 process_wait()가 이미 성공적으로 호출되었다면,
- * 기다리지 않고 즉시 -1을 반환합니다.
- *
- * This function will be implemented in problem 2-2.  For now, it
- * does nothing. */
-// 10주차 새로운게 다 돌아갈 때 까지 기다리게
+ * 기다리지 않고 즉시 -1을 반환합니다.*/
 int process_wait(tid_t child_tid UNUSED)
 {
-	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
-	 * XXX:       to add infinite loop here before
-	 * XXX:       implementing the process_wait. */
-	sema_down(&temporary);
-	return -1;
+	// [1] 세팅: thread 구조체
+	// 1. thread 구조체에 struct semaphore dead 추가
+	// 2. thread 구조체에 list_elem 추가
+	// 3. thread 구조체에 bool waited 추가 (wait은 1번만 가능)
+	// 4. thread 구조체에 parent 추가
+	// 5. 스레드 생길 때 child_list 선언 및 초기화 (부모-자식 확인용) :
+	// init_thread()
+	// 5. 스레드 생길 때 sema_init(&child->dead, 0) : init_thread()
+	// 6. fork시 parent 값 세팅 : __do_fork()
+
+	// [2] 자식 스레드의 작업
+	// 1. 자식 스레드는 자기 작업이 다 끝나면 exit_status 값 세팅
+	// : exit syscall에서 세팅
+	// 2. (조건문) 부모 스레드가 NULL 이거나 죽은 스레드인지 확인 (고아
+	// 확인 - TC: wait-killed) : process_exit()
+	// 3. (조건문) 2번이 false이면 세마포어 업 (부모 깨우기)
+	// 4. 자기 자신 thread_exit() (스케쥴러로 넘어가서 이 스레드 다시
+	// 실행되지 않음)
+
+	// [3] 부모 스레드의 작업
+	// 1. find_child(): child_list에서 해당 tid가 자기 자식 맞는지 확인:
+	// 없으면 -1 반환
+	// 2. 유효한 TID인지: 아니면 -1 반환
+	// 3. 인터럽트 끄기 & child->waited = false인지 확인: 아니면 -1 반환 &
+	// 인터럽트 원래 상태로 복원
+	// 4. 1~3 통과했으면 child->waited = true로 세팅 & 인터럽트 원래 상태로
+	// 복원
+	// 5. sema_down 하고 자식이 up할 까지 기다림
+	// 6. up됐으면 exit_status 값을 지역 변수 status에 기록
+	// 7. list_remove
+	// 8. return status
+	struct thread *child = find_child(child_tid);
+	if (!child) // 못 찾았거나 유효하지 않은 TID
+	{
+		return -1;
+	}
+
+	enum intr_level old_level;
+	ASSERT(!intr_context());
+	old_level = intr_disable();
+	if (child->waited) {
+		intr_set_level(old_level);
+		return -1;
+	}
+	child->waited = true;
+	intr_set_level(old_level);
+
+	sema_down(&child->dead);
+
+	int status = child->exit_status;
+	list_remove(&child->child_elem);
+
+	return status;
 }
 
 /* Exit the process. This function is called by thread_exit (). */
 void process_exit(void)
 {
 	struct thread *curr = thread_current();
-	/* TODO: Your code goes here.
-	 * TODO: Implement process termination message (see
-	 * TODO: project2/process_termination.html).
-	 * TODO: We recommend you to implement process resource cleanup here. */
-	sema_up(&temporary);
+
+	/* 부모 스레드가 NULL 이거나 죽은 스레드인지 확인 */
+	if (curr->parent != NULL && curr->parent->status != THREAD_DYING) {
+		sema_up(&curr->dead);
+	}
+
 	process_cleanup();
 }
 

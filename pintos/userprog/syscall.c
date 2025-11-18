@@ -18,11 +18,6 @@ bool is_valid_buffer(const void *buffer, unsigned length);
 static struct intr_frame *current_syscall_frame;
 
 /* 시스템 콜 처리
- *
- * 과거에는 시스템 콜을 인터럽트 핸들러로 처리했습니다 (예: 리눅스의 int 0x80).
- * 하지만 x86-64에서는 제조사가 더 효율적인 방법인 `syscall` 명령어를
- * 제공합니다.
- *
  * syscall 명령어는 MSR(Model Specific Register)의 값을 읽어서 동작합니다.
  * 자세한 내용은 매뉴얼을 참고하세요. */
 
@@ -72,12 +67,12 @@ void syscall_handler(struct intr_frame *f UNUSED)
 		f->R.rax = pid; // 부모 프로세스의 입장에서 반환값을 pid로 설정
 		break;
 	case SYS_EXEC:
-		f->R.rax = exec((const char *)arg1);
 		// exec 성공시 do_iret으로 새 프로그램으로 전환되어 여기로
 		// 돌아오지 않음 실패시에만 -1을 반환하고 여기로 돌아옴
+		f->R.rax = exec((const char *)arg1);
 		break;
 	case SYS_WAIT: // TODO:
-		// wait 구현
+		f->R.rax = wait((pid_t)arg1);
 		break;
 	case SYS_CREATE:
 		// create 구현
@@ -111,6 +106,11 @@ void syscall_handler(struct intr_frame *f UNUSED)
 		break;
 	}
 	// printf("system call!\n");
+}
+
+int wait(pid_t child_tid)
+{
+	return process_wait(child_tid);
 }
 
 int exec(const char *file)
@@ -201,7 +201,10 @@ int filesize(int fd)
 
 pid_t fork(const char *thread_name)
 {
+	// printf("fork call!\n");
+
 	tid_t pid = process_fork(thread_name, current_syscall_frame);
+	// printf("fork call! : %d\n", pid);
 
 	if (pid == TID_ERROR)
 		return -1;
