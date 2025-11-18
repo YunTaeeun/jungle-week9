@@ -7,7 +7,9 @@
 #include "userprog/gdt.h"
 #include "threads/flags.h"
 #include "intrinsic.h"
+#include "lib/string.h"
 #include "threads/init.h"      /* power_off() */
+#include "threads/malloc.h"    /* malloc() */
 #include "userprog/process.h"  // 프로세스 관련 함수 사용을 위함
 #include "threads/synch.h"     // 락 함수를 사용하기 위해 사용
 #include "filesys/filesys.h"   // 파일 관련 함수 사용을 위함
@@ -195,11 +197,13 @@ static void check_valid_buffer(const void *buffer, size_t size, bool writable)
     const uint8_t *addr = (const uint8_t *)pg_round_down(buffer);  // 버퍼 시작을 페이지 경계로 내림
     const uint8_t *end = (const uint8_t *)pg_round_up((const uint8_t *)buffer +
                                                       size);  // 버퍼 끝을 페이지 경계로 올림
-    while (addr < end)                                        // 모든 페이지를 순회
+
+    while (addr < end)  // 모든 페이지를 순회
     {
         if (!check_user_vaddr((const void *)addr, writable))  // 각 페이지의 유효성 검증
         {
-            thread_exit();  // 검증 실패 시 프로세스 종료
+            thread_current()->exit_status = -1;  // 검증 실패 시 exit_status 설정
+            thread_exit();                       // 검증 실패 시 프로세스 종료
         }
         addr += PGSIZE;  // 다음 페이지로 이동
     }
@@ -221,7 +225,8 @@ static void check_valid_string(const char *str)
     // NULL 포인터 체크
     if (str == NULL)
     {
-        thread_exit();  // NULL 포인터는 즉시 종료
+        thread_current()->exit_status = -1;  // NULL 포인터는 exit(-1)
+        thread_exit();                       // NULL 포인터는 즉시 종료
     }
 
     // 문자열의 각 바이트를 순회하며 검증
@@ -231,6 +236,7 @@ static void check_valid_string(const char *str)
         // 각 바이트가 유효한 사용자 메모리인지 확인 (읽기만 필요)
         if (!check_user_vaddr(p, false))
         {
+            thread_current()->exit_status = -1;  // 유효하지 않은 주소는 exit(-1)
             thread_exit();  // 유효하지 않은 주소면 프로세스 종료
         }
 
@@ -252,10 +258,8 @@ static void sys_exit(struct intr_frame *f UNUSED)
     struct thread *t = thread_current();
     int status = f->R.rdi;  // 첫 번째 인자
 
-    // exit_status 설정 및 출력
+    // exit_status 설정 및 출력 -> 프로세스 exit 에서 수행
     t->exit_status = status;
-    printf("%s: exit(%d)\n", t->name, status);
-
     thread_exit();  // 이 함수 내부에서 process_exit()이 호출됨
 }
 
@@ -388,6 +392,7 @@ static void sys_read(struct intr_frame *f UNUSED)
         f->R.rax = -1;
         return;
     }
+
     // 일반 읽기 수행
     lock_acquire(&filesys_lock);
     f->R.rax = file_read(t->fds[fd], buffer, length);

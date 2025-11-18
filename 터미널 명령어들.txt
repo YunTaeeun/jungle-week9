@@ -2,7 +2,7 @@
 
 
 
-clear && cd .. && make clean && make && cd build &&for t in args-{none,single,multiple,many,dbl-space}; do make tests/userprog/$t.result; done
+clear && cd .. && make clean && make && cd build &&
 
 
 for t in alarm-{single,multiple,simultaneous,priority,zero,negative}; do make tests/threads/$t.result; done
@@ -11,32 +11,81 @@ for t in priority-{change,donate-one,donate-multiple,donate-multiple2,donate-nes
 
 for t in mlfqs-{load-1,load-60,load-avg,recent-1,fair-2,fair-20,nice-2,nice-10,block}; do make tests/threads/mlfqs/$t.result; done
 
-# UserProg - Argument Passing
+# UserProg - Argument Passing (5개)
 for t in args-{none,single,multiple,many,dbl-space}; do make tests/userprog/$t.result; done
 
-# UserProg - Syscall Basics (halt/exit/create/open/close/read/write)
-for t in halt exit create-{normal,empty,null,bad-ptr,long,exists,bound} open-{normal,missing,boundary,empty,null,bad-ptr,twice} close-{normal,twice,bad-fd} read-{normal,bad-ptr,boundary,zero,stdout,bad-fd} write-{normal,bad-ptr,boundary,zero,stdin,bad-fd}; do make tests/userprog/$t.result; done
+# UserProg - Syscall Basics (halt/exit/create/open/close/read/write) (29개)
+for t in halt exit create-{normal,empty,null,bad-ptr,long,exists,bound} 
+open-{normal,missing,boundary,empty,null,bad-ptr,twice} close-{normal,twice,bad-fd} 
+read-{normal,bad-ptr,boundary,zero,stdout,bad-fd} write-{normal,bad-ptr,boundary,zero,stdin,bad-fd}; do make tests/userprog/$t.result; done
 
-# UserProg - Process Control (exec/fork/wait/child)
-for t in exec-{once,arg,boundary,missing,bad-ptr,read} fork-{once,multiple,recursive,read,close,boundary} wait-{simple,twice,killed,bad-pid} child-{simple,args,bad,close,rox,read}; do make tests/userprog/$t.result; done
+# UserProg - Process Control (exec/fork/wait/child) (16개)
+for t in exec-{once,arg,boundary,missing,bad-ptr,read} fork-{once,multiple,recursive,read,close,boundary} wait-{simple,twice,killed,bad-pid} ; do make tests/userprog/$t.result; done
 
 
-
-# 현재 실제 통과한 테스트 (2025-11-17 기준, 실제 실행 결과 반영)
-# 통과: 28개 / 전체: 64개 (43.75%)
-# Argument Passing (5개 모두 통과)
+# 현재 실제 통과한 테스트 (2025-11-17)
+# Argument Passing 
 for t in args-{none,single,multiple,many,dbl-space}; do make tests/userprog/$t.result; done
-# System Call Basic (2개 모두 통과)
+# System Call Basic 
 for t in halt exit; do make tests/userprog/$t.result; done
-# File System Calls (통과한 것만)
-for t in create-{normal,empty,bound} open-{normal,twice,boundary,empty,missing} close-{normal,twice,bad-fd} read-{zero,stdout,bad-fd} write-{normal,boundary,zero,stdin,bad-fd}; do make tests/userprog/$t.result; done
-# Process Control (통과한 것만)
+# File System Calls 
+for t in create-{normal,empty,bound} open-{normal,twice,boundary,empty,missing} 
+close-{normal,twice,bad-fd} read-{zero,stdout,bad-fd} write-{normal,boundary,zero,stdin,bad-fd}; 
+do make tests/userprog/$t.result; done
+# Process Control 
 for t in wait-bad-pid; do make tests/userprog/$t.result; done
-# Read-Only Executable (통과한 것만)
-for t in rox-simple; do make tests/userprog/$t.result; done
 
-# 통합 실행 (실제 통과한 28개 테스트만)
-for t in args-{none,single,multiple,many,dbl-space} halt exit create-{normal,empty,bound} open-{normal,twice,boundary,empty,missing} close-{normal,twice,bad-fd} read-{zero,stdout,bad-fd} write-{normal,boundary,zero,stdin,bad-fd} wait-bad-pid rox-simple; do make tests/userprog/$t.result; done
+
+
+# 통과한 테스트 (2025-11-18 / 14:32)
+
+# 1. NULL 포인터 및 잘못된 포인터 처리 성공 (4개)
+# 원인: check_valid_* 함수에서 thread_exit() 호출 시 exit 메시지 미출력
+       process_cleanup를 해버린후 호출라려고 해서 항상 false이 났던 것 해결  
+for t in create-{null,bad-ptr} open-{null,bad-ptr}; do make tests/userprog/$t.result; done
+
+# 5. exec-bad-ptr 테스트 성공 (1개)
+# 위와 같은 원인인
+for t in exec-bad-ptr; do make tests/userprog/$t.result; done
+
+# 3. 예외 핸들러에서 exit 메시지 미출력 (4개)  => 성공
+# 원인: page_fault 핸들러에서 thread_exit() 호출 시 exit 메시지 미출력
+# => 주석으로 사용자 오류시 출력 제거하라고 써있는거 못봤었음
+for t in bad-{read,write,read2,write2}; do make tests/userprog/$t.result; done
+
+# 2. 파일 읽기/쓰기 버그 (4개) => 성공공
+# 원인: 파일 I/O 로직 문제 또는 페이지 경계 처리 문제
+# => 개행 해결 
+for t in read-{normal,bad-ptr,boundary} write-bad-ptr; do make tests/userprog/$t.result; done
+
+
+
+# ============================================
+# 실패한 테스트들 (카테고리별 정리)
+# ============================================
+
+
+# 4. Kernel Panic - pml4_set_page() assertion 실패 (11개)
+# 원인: load() 함수에서 스택 페이지 할당 시 페이지 경계 처리 문제
+for t in exec-{once,arg,missing,boundary,read} wait-{simple,twice,killed} rox-{simple,child,multichild}; 
+do make tests/userprog/$t.result; done
+
+# 6. fork 테스트 실패 (6개)
+# 원인: process_fork() 미완성 (parent_if 전달, 파일 디스크립터 복제, duplicate_pte 미완성)
+for t in fork-{once,multiple,recursive,read,close,boundary}; do make tests/userprog/$t.result; done
+
+
+
+
+
+
+for t in exec-{once,arg,boundary,missing,bad-ptr,read} ; do make tests/userprog/$t.result; done
+for t in wait-{simple,twice,killed,bad-pid} ; do make tests/userprog/$t.result; done
+for t in rox-{simple,child,multichild} ; do make tests/userprog/$t.result; done
+
+for t in fork-{once,multiple,recursive,read,close,boundary} ; do make tests/userprog/$t.result; done
+
+
 
 
 
@@ -46,11 +95,6 @@ for t in args-{none,single,multiple,many,dbl-space} halt exit create-{normal,emp
 
 
 
-
-그럼 load에 ./dwdw ff f ff  ff   이러게 file_name이게 들어오면 이걸 일단 최고 값은 
-argv[128] 에 strtok_r이걸로 나눔 그리고 filesys_open여기서 file_name이게 필요하니
-file_name이거를argv[0] 으로 설정 그리고 나머지를 setup_stack한다음 밑에 그냥 쌓으면됨
-아니면 정해진 위치가 있는 거임?@Project2: User Programs.txt 이게 요구 사항이니 참고해서 답해봐
 
 
 
