@@ -235,8 +235,8 @@ static char **parse_options(char **argv)
 	return argv;
 }
 
-/* Runs the task specified in ARGV[1]. */
-// 10주차
+/* 시스템 부팅시 단 한번 호출되는 함수.
+ * 최초 프로세스를 생성한다. */
 static void run_task(char **argv)
 {
 	// argv[1] -> 프로그램 이름임
@@ -253,10 +253,14 @@ static void run_task(char **argv)
 	} else {
 		// project2: 유저 프로그램 실행
 		// process.c에서 유저 프로그램을 ELF파일로 로드하여 실행한다.
-		// process_create_initd() > initd() > process_exec() > load() >
-		// do_iret()
-		// printf("===> run task: %s", task);
-		process_wait(process_create_initd(task));
+		// process_wait(process_create_initd(task));
+
+		tid_t tid = process_create_initd(task);
+		if (tid != TID_ERROR) {
+			// 프로세스 생성에 성공했으면, 해당 프로세스가
+			// 종료될때까지 대기
+			process_wait_initd(); // 최초 프로세스용 대기함수
+		}
 	}
 #else
 	run_test(task);

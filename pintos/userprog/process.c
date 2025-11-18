@@ -24,7 +24,7 @@
 #endif
 
 // process.c : ELF 바이너리를 로드하고 프로세스를 시작합니다
-static struct semaphore temporary;
+static struct semaphore initial;
 static void process_cleanup(void);
 static bool load(const char *file_name, struct intr_frame *if_);
 static void initd(void *f_name);
@@ -49,7 +49,7 @@ tid_t process_create_initd(const char *file_name)
 
 	static bool sema_initialized = false;
 	if (!sema_initialized) {
-		sema_init(&temporary, 0);
+		sema_init(&initial, 0);
 		sema_initialized = true;
 	}
 	char *fn_copy;
@@ -126,7 +126,6 @@ struct fork_args {
  * 스레드를 생성할 수 없으면 TID_ERROR를 반환합니다. */
 tid_t process_fork(const char *name, struct intr_frame *if_ UNUSED)
 {
-	// printf("===> process_fork called.\n");
 	/* fork인자용 구조체에 데이터를 담는다 */
 	struct fork_args args = {
 	    .parent = thread_current(), .parent_if = if_, .success = false};
@@ -149,8 +148,6 @@ tid_t process_fork(const char *name, struct intr_frame *if_ UNUSED)
 	}
 
 	/* 자식 프로세스 생성 결과를 돌려준다. */
-	// printf("===> process_fork finished: %d.\n", child_tid);
-
 	return child_tid;
 }
 
@@ -225,18 +222,11 @@ static void __do_fork(void *aux)
 		goto error;
 #endif
 
-	/* TODO: 여기에 코드를 작성하세요.
-	 * TODO: 힌트) 파일 객체를 복제하려면 include/filesys/file.h의
-	 * `file_duplicate`를
-	 * TODO:       사용하세요. 부모는 이 함수가 부모의 리소스를 성공적으로
-	 * 복제할 때까지
-	 * TODO:       fork()에서 반환하면 안 됩니다. */
-
-	// TODO: 일단 파일 복제는 건너뛰고 open 구현 후에 수정.
-	//  if (파일_복제_실패) {
-	//      succ = false;
-	//      goto error;
-	//  }
+	// TODO: 파일 복제
+	//   if (파일_복제_실패) {
+	//       succ = false;
+	//       goto error;
+	//   }
 	process_init();
 
 	/* 수행 성공을 저장 */
@@ -283,7 +273,7 @@ int process_exec(void *f_name)
 	process_cleanup();
 
 	/* 3. load() 함수를 호출하여 새 프로그램을 메모리에 적재. */
-	printf("===> load.\n");
+	// printf("===> load.\n");
 
 	success = load(file_name, &_if);
 
@@ -298,7 +288,7 @@ int process_exec(void *f_name)
 	 * CPU 레지스터가 _if에 설정된 값(rip, rsp 등)으로 갱신되며,
 	 * 유저 프로그램의 진입점(rip)에서 실행을 시작.
 	 * 이 함수는 커널로 돌아오지 않음. */
-	printf("===> do_iret.\n");
+	// printf("===> do_iret.\n");
 
 	do_iret(&_if);
 	NOT_REACHED();
@@ -310,13 +300,22 @@ struct thread *find_child(tid_t target_tid)
 	struct thread *child = NULL;
 	for (e = list_begin(&thread_current()->child_list);
 	     e != list_end(&thread_current()->child_list); e = list_next(e)) {
-		child = list_entry(e, struct thread, elem);
+		child = list_entry(e, struct thread, child_elem);
 		if (child->tid == target_tid) {
 			return child;
 		}
 	}
 
 	return NULL;
+}
+
+/* 최초 프로세스(initd로 생성된 프로세스)가 종료될 때까지 기다립니다.
+ * 이 함수는 init.c의 run_task에서 호출됩니다.
+ * process_wait와 달리 부모-자식 관계가 없는 최초 프로세스를 위해
+ * initial 세마포어를 사용합니다. */
+void process_wait_initd(void)
+{
+	sema_down(&initial);
 }
 
 /* 스레드 TID가 종료될 때까지 기다리고 종료 상태를 반환합니다. 만약
@@ -386,9 +385,13 @@ void process_exit(void)
 {
 	struct thread *curr = thread_current();
 
-	/* 부모 스레드가 NULL 이거나 죽은 스레드인지 확인 */
+	/*  부모가 있는 경우 (fork로 생성된 프로세스) */
 	if (curr->parent != NULL && curr->parent->status != THREAD_DYING) {
 		sema_up(&curr->dead);
+	}
+	/* 부모가 없는 경우 (최초 프로세스 - initd로 생성) */
+	else if (curr->parent == NULL) {
+		sema_up(&initial);
 	}
 
 	process_cleanup();

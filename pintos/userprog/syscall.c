@@ -8,14 +8,31 @@
 #include "userprog/gdt.h"
 #include "threads/flags.h"
 #include "intrinsic.h"
+#include "threads/palloc.h"
+#include "filesys/filesys.h"
+#include "threads/synch.h"
 
-// syscall.c: 시스템콜 처리를 담당하는 파일
-
+// syscall.c: 시스템콜 처리를 담당하는 파일. 유저-커널 인터페이스.
 void syscall_entry(void);
 void syscall_handler(struct intr_frame *);
+bool is_valid_user_memory(void *ptr);
 bool is_valid_buffer(const void *buffer, unsigned length);
+static char *copy_string_from_user_to_kernel(const char *ustr);
+
+/* 시스템콜 함수 선언 */
+void halt(void);
+void exit(int status);
+pid_t fork(const char *thread_name);
+int exec(const char *file);
+int wait(pid_t child_tid);
+bool create(const char *file, unsigned initial_size);
+bool remove(const char *file);
+int open(const char *file);
 
 static struct intr_frame *current_syscall_frame;
+static struct lock filesys_lock;
+
+#define FILE_NAME_MAX 14 /* filesys.c의 NAME_MAX와 동일 */
 
 /* 시스템 콜 처리
  * syscall 명령어는 MSR(Model Specific Register)의 값을 읽어서 동작합니다.
@@ -25,6 +42,8 @@ static struct intr_frame *current_syscall_frame;
 #define MSR_LSTAR 0xc0000082 /* Long 모드에서 SYSCALL의 목적지 주소 */
 #define MSR_SYSCALL_MASK 0xc0000084 /* eflags 레지스터 마스크 */
 
+// TODO: 시스템콜 핸들러는 유저 포인터를 절대 직접 쓰지 않는다는 철학이 있다.
+// 이 철학에 맞춰 각 시스템콜에 검증로직 추가.
 void syscall_init(void)
 {
 	write_msr(MSR_STAR, ((uint64_t)SEL_UCSEG - 0x10) << 48 |
@@ -36,6 +55,8 @@ void syscall_init(void)
 	 * 따라서 FLAG_FL 등의 플래그를 마스킹합니다. */
 	write_msr(MSR_SYSCALL_MASK,
 		  FLAG_IF | FLAG_TF | FLAG_DF | FLAG_IOPL | FLAG_AC | FLAG_NT);
+
+	lock_init(&filesys_lock);
 }
 
 /* 시스템 콜의 메인 인터페이스 */
@@ -71,17 +92,17 @@ void syscall_handler(struct intr_frame *f UNUSED)
 		// 돌아오지 않음 실패시에만 -1을 반환하고 여기로 돌아옴
 		f->R.rax = exec((const char *)arg1);
 		break;
-	case SYS_WAIT: // TODO:
+	case SYS_WAIT:
 		f->R.rax = wait((pid_t)arg1);
 		break;
 	case SYS_CREATE:
-		// create 구현
+		f->R.rax = create((const char *)arg1, (unsigned)arg2);
 		break;
 	case SYS_REMOVE:
-		// remove 구현
+		f->R.rax = remove((const char *)arg1);
 		break;
 	case SYS_OPEN:
-		// open 구현
+		open((const char *)arg1);
 		break;
 	case SYS_FILESIZE:
 		// filesize(0);
@@ -106,6 +127,83 @@ void syscall_handler(struct intr_frame *f UNUSED)
 		break;
 	}
 	// printf("system call!\n");
+}
+/**
+ * 각 프로세스는 자신만의 fd 테이블을 가진다.
+ * 0, 1은 예약(stdin/stdout) → open은 3 이상부터 반환
+ * 한 파일을 여러 번 열어도 별도 fd 생성 → 각각 독립적 close
+ * fd 테이블은 커널 메모리에 있고,
+ * syscall.c (또는 struct thread) 안에서 직접 관리
+ */
+int open(const char *file)
+{
+	// 성공하면 3 이상의 정수인 "파일 디스크립터(fd)"를 반환
+	// 에러면 exit(-1)
+
+	// 1. 파일명 검증
+	// 2. 파일명 복사
+	// 3. 파일명으로 파일 객체 연결
+	// 4. fd 할당
+	// 5. inode type 검증?
+}
+
+bool remove(const char *file)
+{
+	// 0. 널포인터 검증 후 exit(-1)
+	if (file == NULL)
+		exit(-1);
+
+	// 1. 보안을 위해 시작 주소 검증
+	if (!is_valid_user_memory(file))
+		exit(-1);
+
+	// 2. 유저메모리에 있던 파일명을 커널메모리로 복사 (동적할당)
+	const char *kernel_file = copy_string_from_user_to_kernel(file);
+	if (kernel_file == NULL || (strlen(kernel_file) == 0) ||
+	    (strlen(kernel_file) > FILE_NAME_MAX)) {
+		palloc_free_page(kernel_file);
+		return false;
+	}
+
+	// 3. 파일 삭제
+	lock_acquire(&filesys_lock);
+	bool result = filesys_remove(kernel_file);
+	lock_release(&filesys_lock);
+
+	// 4. 메모리 해제
+	palloc_free_page(kernel_file);
+
+	return result;
+}
+
+// 지정한 이름으로 size바이트 짜리 빈 파일을 디스크에 만들기. open 없음.
+bool create(const char *file, unsigned initial_size)
+{
+	// 0. 널포인터 검증 후 exit(-1)
+	if (file == NULL)
+		exit(-1);
+
+	// 1. 보안을 위해 시작 주소 검증
+	if (!is_valid_user_memory(file))
+		exit(-1);
+
+	// 2. 유저메모리에 있던 파일명을 커널메모리로 복사 (동적할당)
+	const char *kernel_file = copy_string_from_user_to_kernel(file);
+	if (kernel_file == NULL || (strlen(kernel_file) == 0) ||
+	    (strlen(kernel_file) > FILE_NAME_MAX)) {
+		palloc_free_page(kernel_file);
+		return false;
+	}
+
+	// 3. 파일 생성
+	lock_acquire(&filesys_lock);
+	bool result = filesys_create(kernel_file, initial_size);
+	lock_release(&filesys_lock);
+
+	// 4. 메모리 해제
+	palloc_free_page(kernel_file);
+
+	return result;
 }
 
 int wait(pid_t child_tid)
@@ -195,17 +293,41 @@ bool is_valid_buffer(const void *buffer, unsigned length)
 	return true;
 }
 
+static char *copy_string_from_user_to_kernel(const char *user_str)
+{
+	if (user_str == NULL || !is_valid_user_memory(user_str))
+		return NULL;
+
+	char *kernel_str = palloc_get_page(0);
+	if (kernel_str == NULL)
+		return NULL;
+
+	// 한 바이트씩 안전하게 복사
+	size_t i;
+	for (i = 0; i < PGSIZE; i++) {
+		if (!is_user_vaddr(user_str + i)) {
+			palloc_free_page(kernel_str);
+			return NULL;
+		}
+
+		kernel_str[i] = user_str[i];
+
+		if (kernel_str[i] == '\0')
+			return kernel_str;
+	}
+
+	// 문자열이 너무 길거나(PGSIZE 초과) 널 종료문자가 없다
+	palloc_free_page(kernel_str);
+	return NULL;
+}
+
 int filesize(int fd)
 {
 }
 
 pid_t fork(const char *thread_name)
 {
-	// printf("fork call!\n");
-
 	tid_t pid = process_fork(thread_name, current_syscall_frame);
-	// printf("fork call! : %d\n", pid);
-
 	if (pid == TID_ERROR)
 		return -1;
 	return pid;
