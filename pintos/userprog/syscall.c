@@ -1,6 +1,8 @@
 #include "userprog/syscall.h"
 #include <stdio.h>
+#include <string.h>
 #include <syscall-nr.h>
+#include <round.h>
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "threads/loader.h"
@@ -18,6 +20,7 @@ void syscall_handler(struct intr_frame *);
 bool is_valid_user_memory(void *ptr);
 bool is_valid_buffer(const void *buffer, unsigned length);
 static char *copy_string_from_user_to_kernel(const char *ustr);
+// void create_fd_table(struct fd_table *);
 
 /* 시스템콜 함수 선언 */
 void halt(void);
@@ -28,6 +31,7 @@ int wait(pid_t child_tid);
 bool create(const char *file, unsigned initial_size);
 bool remove(const char *file);
 int open(const char *file);
+void close(int fd);
 
 static struct intr_frame *current_syscall_frame;
 static struct lock filesys_lock;
@@ -38,25 +42,24 @@ static struct lock filesys_lock;
  * syscall 명령어는 MSR(Model Specific Register)의 값을 읽어서 동작합니다.
  * 자세한 내용은 매뉴얼을 참고하세요. */
 
-#define MSR_STAR 0xc0000081  /* 세그먼트 셀렉터 MSR */
-#define MSR_LSTAR 0xc0000082 /* Long 모드에서 SYSCALL의 목적지 주소 */
+#define MSR_STAR 0xc0000081	    /* 세그먼트 셀렉터 MSR */
+#define MSR_LSTAR 0xc0000082	    /* Long 모드에서 SYSCALL의 목적지 주소 */
 #define MSR_SYSCALL_MASK 0xc0000084 /* eflags 레지스터 마스크 */
 
 // TODO: 시스템콜 핸들러는 유저 포인터를 절대 직접 쓰지 않는다는 철학이 있다.
 // 이 철학에 맞춰 각 시스템콜에 검증로직 추가.
 void syscall_init(void)
 {
-	write_msr(MSR_STAR, ((uint64_t)SEL_UCSEG - 0x10) << 48 |
-				((uint64_t)SEL_KCSEG) << 32);
+	write_msr(MSR_STAR, ((uint64_t)SEL_UCSEG - 0x10) << 48 | ((uint64_t)SEL_KCSEG) << 32);
 	write_msr(MSR_LSTAR, (uint64_t)syscall_entry);
 
 	/* syscall_entry가 유저랜드 스택을 커널 모드 스택으로 교체하기 전까지는
 	 * 인터럽트 서비스 루틴이 어떤 인터럽트도 처리하면 안 됩니다.
 	 * 따라서 FLAG_FL 등의 플래그를 마스킹합니다. */
-	write_msr(MSR_SYSCALL_MASK,
-		  FLAG_IF | FLAG_TF | FLAG_DF | FLAG_IOPL | FLAG_AC | FLAG_NT);
+	write_msr(MSR_SYSCALL_MASK, FLAG_IF | FLAG_TF | FLAG_DF | FLAG_IOPL | FLAG_AC | FLAG_NT);
 
 	lock_init(&filesys_lock);
+	// create_fd_table(&fdt);
 }
 
 /* 시스템 콜의 메인 인터페이스 */
@@ -102,7 +105,7 @@ void syscall_handler(struct intr_frame *f UNUSED)
 		f->R.rax = remove((const char *)arg1);
 		break;
 	case SYS_OPEN:
-		open((const char *)arg1);
+		f->R.rax = open((const char *)arg1);
 		break;
 	case SYS_FILESIZE:
 		// filesize(0);
@@ -120,7 +123,7 @@ void syscall_handler(struct intr_frame *f UNUSED)
 		// tell 구현
 		break;
 	case SYS_CLOSE:
-		// close 구현
+		close((int)arg1);
 		break;
 	default:
 		printf("Unknown system call: %d\n", syscall_number);
@@ -128,23 +131,104 @@ void syscall_handler(struct intr_frame *f UNUSED)
 	}
 	// printf("system call!\n");
 }
+
+/*
+ * 잘못된 fd는 조용히 무시 (아무것도 안 함)
+ * 치명적인 에러만 exit(-1) (예: 메모리 접근 위반) */
+void close(int fd)
+{
+	struct fd_table *fdt = thread_current()->fdt;
+
+	// 1. 범위 검증
+	if (fd < 3 || fd >= fdt->capacity) {
+		return;
+	}
+	// 2. fd의 슬롯이 NULL인 경우 (이미 닫힌 슬롯)
+	if (fdt->files[fd] == NULL)
+		return;
+
+	// 3. 되감기
+	if (fd < fdt->next_fd) {
+		fdt->next_fd = fd;
+	}
+
+	// 4. 파일 객체 회수
+	file_close(fdt->files[fd]);
+	fdt->files[fd] = NULL;
+}
+
 /**
  * 각 프로세스는 자신만의 fd 테이블을 가진다.
  * 0, 1은 예약(stdin/stdout) → open은 3 이상부터 반환
  * 한 파일을 여러 번 열어도 별도 fd 생성 → 각각 독립적 close
  * fd 테이블은 커널 메모리에 있고,
  * syscall.c (또는 struct thread) 안에서 직접 관리
+ * 성공하면 3 이상의 정수인 "파일 디스크립터(fd)"를 반환
+ * 실패하면 -1 반환,  메모리 오류는 exit(-1)
  */
 int open(const char *file)
 {
-	// 성공하면 3 이상의 정수인 "파일 디스크립터(fd)"를 반환
-	// 에러면 exit(-1)
+	// [0] 세팅
+	// 1. struct fd_table 정의와 초기슬롯수, 매직넘버 디파인
+	// 2. syscall.함수에 초기화 함수 정의
+	// 3. thread 구조체에 struct fd_table *fdt; 멤버 추가 및 init_thread()에서 NULL로 초기화
+	// 4. process_exit()에서 남은 fd 모두 file_close - free(td_table)
+	// TODO: 5. fork시 부모테이블 복사 > 각 file 객체 recnt++ (?).. 일단 보류.
 
-	// 1. 파일명 검증
-	// 2. 파일명 복사
-	// 3. 파일명으로 파일 객체 연결
-	// 4. fd 할당
-	// 5. inode type 검증?
+	// [1] open함수
+	// 0. 널포인터 검증 후 exit(-1)
+	if (file == NULL)
+		exit(-1);
+
+	// 1. 보안을 위해 시작 주소 검증
+	if (!is_valid_user_memory(file))
+		exit(-1);
+
+	// 2. 유저메모리에 있던 파일명을 커널메모리로 복사 (동적할당)
+	const char *kernel_file = copy_string_from_user_to_kernel(file);
+	if (kernel_file == NULL || (strlen(kernel_file) == 0) ||
+	    (strlen(kernel_file) > FILE_NAME_MAX)) {
+		palloc_free_page(kernel_file);
+		return -1;
+	}
+
+	// 3. 파일 열기
+	lock_acquire(&filesys_lock);
+	struct file *opened_file = filesys_open(kernel_file);
+	lock_release(&filesys_lock);
+	if (opened_file == NULL)
+		return -1;
+
+	// 4. capacity 확인
+
+	struct fd_table *fdt = thread_current()->fdt;
+	if (fdt->next_fd >= fdt->capacity) // capacity 가득참
+	{
+		// capacity * 2 만큼 realloc.
+		// 실패시 file_close 로 롤백하고 return -1;
+		int new_pages = DIV_ROUND_UP(fdt->capacity * 2 * sizeof(struct file *), PGSIZE);
+		struct file **new = palloc_get_multiple(PAL_ZERO, new_pages);
+		memcpy(new, fdt->files, fdt->capacity * sizeof(struct file *));
+
+		// 기존 페이지 free
+		palloc_free_multiple(fdt->files,
+				     DIV_ROUND_UP(fdt->capacity * sizeof(struct file *), PGSIZE));
+
+		// 테이블 포인터 변경
+		fdt->files = new;
+
+		// capacity 변경
+		fdt->capacity *= 2;
+	}
+
+	// 5. fd_table에 추가하고 fd를 돌려받는다. fd_next ++한다.
+	int fd = fdt->next_fd;
+	fdt->files[fd] = opened_file;
+	(fdt->next_fd)++;
+
+	// 6. 해당 fd번호를 반환한다.
+	palloc_free_page(kernel_file);
+	return fd;
 }
 
 bool remove(const char *file)

@@ -85,8 +85,8 @@ static void init_thread(struct thread *, const char *name, int priority);
 static void do_schedule(int status);
 static void schedule(void);
 static tid_t allocate_tid(void);
-static bool compare_priority(const struct list_elem *a,
-			     const struct list_elem *b, void *aux UNUSED);
+static bool compare_priority(const struct list_elem *a, const struct list_elem *b,
+			     void *aux UNUSED);
 
 /* Returns true if T appears to point to a valid thread. */
 #define is_thread(t) ((t) != NULL && (t)->magic == THREAD_MAGIC)
@@ -133,8 +133,7 @@ void thread_init(void)
 	/* Reload the temporal gdt for the kernel
 	 * This gdt does not include the user context.
 	 * The kernel will rebuild the gdt with user context, in gdt_init (). */
-	struct desc_ptr gdt_ds = {.size = sizeof(gdt) - 1,
-				  .address = (uint64_t)gdt};
+	struct desc_ptr gdt_ds = {.size = sizeof(gdt) - 1, .address = (uint64_t)gdt};
 	lgdt(&gdt_ds);
 
 	/* Init the globla thread context */
@@ -178,6 +177,15 @@ void thread_tick(void)
 	/* Update statistics. */
 	if (t == idle_thread)
 		idle_ticks++;
+// 유저프로세스와 커널 스레드 구분
+/**
+ * 유저 프로세스: pml4 != NULL (유저 주소 공간 보유)
+ * - initd() 또는 __do_fork()에서 pml4_create() 호출
+ * - process_init() 호출됨
+ * 커널 스레드: pml4 == NULL (커널 주소 공간만 사용)
+ * - thread_create()로 생성되지만 pml4_create() 호출 안함
+ * - process_init() 호출 안됨
+ */
 #ifdef USERPROG
 	else if (t->pml4 != NULL)
 		user_ticks++;
@@ -194,8 +202,8 @@ void thread_tick(void)
 /* 스레드 통계 정보를 출력합니다. */
 void thread_print_stats(void)
 {
-	printf("Thread: %lld idle ticks, %lld kernel ticks, %lld user ticks\n",
-	       idle_ticks, kernel_ticks, user_ticks);
+	printf("Thread: %lld idle ticks, %lld kernel ticks, %lld user ticks\n", idle_ticks,
+	       kernel_ticks, user_ticks);
 }
 
 /* Creates a new kernel thread named NAME with the given initial
@@ -221,8 +229,7 @@ void thread_print_stats(void)
    스케줄될 수도 있고, 심지어 반환되기 전에 종료될 수도 있습니다.
    반대로 기존 스레드는 새 스레드가 스케줄되기 전까지 얼마나 오래든 실행될 수
    있습니다. 실행 순서를 보장하려면 세마포어나 다른 동기화 수단을 사용하세요.*/
-tid_t thread_create(const char *name, int priority, thread_func *function,
-		    void *aux)
+tid_t thread_create(const char *name, int priority, thread_func *function, void *aux)
 {
 	// printf("===> thread_create started.\n");
 
@@ -395,8 +402,7 @@ void thread_yield(void)
 
 	old_level = intr_disable();
 	if (curr != idle_thread)
-		list_insert_ordered(&ready_list, &curr->elem, compare_priority,
-				    NULL);
+		list_insert_ordered(&ready_list, &curr->elem, compare_priority, NULL);
 	do_schedule(THREAD_READY);
 	intr_set_level(old_level);
 }
@@ -406,10 +412,8 @@ void thread_set_priority(int new_priority)
 {
 	struct thread *cur_thread = thread_current();
 
-	if (cur_thread->original_priority ==
-	    cur_thread->priority) { // 도네이션이 없는 상황
-		if (new_priority <
-		    cur_thread->priority) { // 낮아지면 thread_yield 실행
+	if (cur_thread->original_priority == cur_thread->priority) { // 도네이션이 없는 상황
+		if (new_priority < cur_thread->priority) { // 낮아지면 thread_yield 실행
 			cur_thread->original_priority = new_priority;
 			cur_thread->priority = new_priority;
 			thread_yield(); // 인터럽트 컨텍스트에서 스레드 양보가
@@ -418,9 +422,8 @@ void thread_set_priority(int new_priority)
 			cur_thread->original_priority = new_priority;
 			cur_thread->priority = new_priority;
 		}
-	} else { // 도네이션이 실행된 상황
-		if (cur_thread->priority <
-		    new_priority) { // 변경 값이 도네이션 받은 값보다 큼
+	} else {					   // 도네이션이 실행된 상황
+		if (cur_thread->priority < new_priority) { // 변경 값이 도네이션 받은 값보다 큼
 			/*두 값다 새로운 값으로 변경*/
 			cur_thread->priority = new_priority;
 			cur_thread->original_priority = new_priority;
@@ -555,6 +558,7 @@ static void init_thread(struct thread *t, const char *name, int priority)
 	t->exit_status = 0;
 	t->waited = false;
 	t->parent = NULL;
+	t->fdt = NULL;
 	list_init(&t->holding_locks);
 	list_init(&t->child_list);
 	sema_init(&t->dead, 0);
@@ -569,12 +573,10 @@ static struct thread *next_thread_to_run(void)
 	if (list_empty(&ready_list))
 		return idle_thread;
 	else
-		return list_entry(list_pop_front(&ready_list), struct thread,
-				  elem);
+		return list_entry(list_pop_front(&ready_list), struct thread, elem);
 }
 
-static bool compare_priority(const struct list_elem *a,
-			     const struct list_elem *b, void *aux UNUSED)
+static bool compare_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
 {
 	struct thread *ta = list_entry(a, struct thread, elem);
 	struct thread *tb = list_entry(b, struct thread, elem);
@@ -703,8 +705,8 @@ static void do_schedule(int status)
 	ASSERT(intr_get_level() == INTR_OFF);
 	ASSERT(thread_current()->status == THREAD_RUNNING);
 	while (!list_empty(&destruction_req)) {
-		struct thread *victim = list_entry(
-		    list_pop_front(&destruction_req), struct thread, elem);
+		struct thread *victim =
+		    list_entry(list_pop_front(&destruction_req), struct thread, elem);
 		palloc_free_page(victim);
 	}
 	thread_current()->status = status;
@@ -742,8 +744,7 @@ static void schedule(void)
 		   수행해야 합니다. 현재 스택이 해당 페이지를 사용 중이므로
 		   여기서는 페이지 해제 요청만 큐에 넣습니다. 실제 파괴 로직은
 		   다음 schedule() 시작 부분에서 호출됩니다. */
-		if (curr && curr->status == THREAD_DYING &&
-		    curr != initial_thread) {
+		if (curr && curr->status == THREAD_DYING && curr != initial_thread) {
 			ASSERT(curr != next);
 			list_push_back(&destruction_req, &curr->elem);
 		}

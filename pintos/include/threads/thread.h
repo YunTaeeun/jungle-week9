@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include "threads/interrupt.h"
 #include "threads/synch.h"
+#include "userprog/syscall.h"
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -145,6 +146,7 @@ struct thread {
 	bool waited;
 	int exit_status; // 종료 상태
 	struct thread *parent;
+	struct fd_table *fdt;
 
 	int nice;	// Nice 값 (-20 ~ 20)
 	int recent_cpu; // 최근 CPU 사용량 (고정소수점) (17.14)
@@ -153,7 +155,7 @@ struct thread {
 	struct list_elem elem; /* List element. */
 	/* 리스트 원소(실행 큐 혹은 대기 큐에서 사용). */
 	int64_t wakeup_tick; /* Wakeup tick. */
-	/* 깨어날 시각(틱). */
+			     /* 깨어날 시각(틱). */
 
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
@@ -172,7 +174,7 @@ struct thread {
 	struct intr_frame tf; /* Information for switching */
 	/* 문맥 전환을 위한 인터럽트 프레임. */
 	unsigned magic; /* Detects stack overflow. */
-	/* 스택 오버플로우 감지를 위한 매직 값. */
+			/* 스택 오버플로우 감지를 위한 매직 값. */
 };
 
 /* If false (default), use round-robin scheduler.
