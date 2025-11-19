@@ -4,9 +4,9 @@
 #include "tests/lib.h"
 #include "tests/main.h"
 
-void
-test_main (void) 
+void test_main(void)
 {
-  *(int *)NULL = 42;
-  fail ("should have exited with -1");
+    volatile int *null_ptr = NULL;
+    *null_ptr = 42;
+    fail("should have exited with -1");
 }

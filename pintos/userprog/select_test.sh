@@ -31,6 +31,7 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../activate"
+PINTOS_CMD="${SCRIPT_DIR}/../utils/pintos"
 
 CONFIG_FILE="${SCRIPT_DIR}/.test_config"
 if [[ ! -f "$CONFIG_FILE" ]]; then
@@ -315,7 +316,7 @@ failed=()
     mkdir -p ${dir}
     
     if [[ "$MODE" == "-q" ]]; then
-      cmd="pintos ${pre_args} -- ${post_args} '${prog_args}'"
+      cmd="${PINTOS_CMD} ${pre_args} -- ${post_args} '${prog_args}'"
       echo "Running ${test} in batch mode... "
       echo "\$ ${cmd}"
       echo
@@ -336,7 +337,7 @@ failed=()
       echo " * 내부 출력은 터미널에 보이면서 '${dir}/${test}.output'에도 저장됩니다."
       echo
 
-      cmd="pintos --gdb ${pre_args} -- ${post_args} '${prog_args}'"
+      cmd="${PINTOS_CMD} --gdb ${pre_args} -- ${post_args} '${prog_args}'"
       echo "\$ ${cmd}"
       eval "${cmd}" 2>&1 | tee "${dir}/${test}.output"
 

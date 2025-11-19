@@ -20,6 +20,8 @@
 #include "threads/synch.h"   // 세마포어 사용을 위해 추가
 #include "threads/loader.h"  // LOADER_ARGS_LEN 정의
 #include "intrinsic.h"
+#include "threads/malloc.h" /* malloc() */
+
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -30,19 +32,15 @@ static bool load(const char* file_name, struct intr_frame* if_);  // ELF 파일 
 static void initd(void* f_name);  // 첫 번째 사용자 프로세스 실행 함수
 static void __do_fork(void*);     // fork 실행 함수
 
-struct fork_data
-{
-    struct thread* parent;
-    struct intr_frame* parent_if;
-    struct semaphore child_create;
-    bool success;
-};
 /* General process initializer for initd and other process. */
 /* initd 및 다른 프로세스를 위한 일반 프로세스 초기화 함수 */
-static void process_init(void)
+static void process_init(void) {}
+
+struct initd_args
 {
-    // 현재는 빈 함수로, 추후 프로세스 초기화 로직이 추가될 예정
-}
+    char* fn_copy;
+    struct child_info* info;
+};
 
 /* Starts the first userland program, called "initd", loaded from FILE_NAME.
  * The new thread may be scheduled (and may even exit)
@@ -69,17 +67,58 @@ tid_t process_create_initd(const char* file_name)
     char* space = strchr(thread_name, ' ');
     if (space != NULL) *space = '\0';
 
+    struct child_info* info = malloc(sizeof(struct child_info));
+    if (info == NULL)
+    {
+        palloc_free_page(fn_copy);
+        return TID_ERROR;
+    }
+    info->tid = TID_ERROR;
+    info->exit_status = 0;
+    sema_init(&info->wait_sema, 0);
+
+    list_push_back(&thread_current()->child_info_list, &info->elem);
+
+    /* 3. 인자 구조체 생성 (initd에 넘겨주기 위함) */
+    struct initd_args* args = malloc(sizeof(struct initd_args));
+    if (args == NULL)
+    {
+        // 실패 시 정리 로직 필요 (생략 가능하지만 안전을 위해)
+        list_remove(&info->elem);
+        free(info);
+        palloc_free_page(fn_copy);
+        return TID_ERROR;
+    }
+    args->fn_copy = fn_copy;
+    args->info = info;
+
     /* Create a new thread to execute FILE_NAME. */
     // 프로그램을 실행할 쓰레드를 하나 만들고 , 그 쓰레드는 바로 initd 실행 (fn_copy를 인자로 받아서
     // -> fn_copy에는 programname args 다 들어있음)
-    tid = thread_create(thread_name, PRI_DEFAULT, initd, fn_copy);
-    if (tid == TID_ERROR) palloc_free_page(fn_copy);
+    tid = thread_create(thread_name, PRI_DEFAULT, initd, args);
+    if (tid == TID_ERROR)
+    {
+        palloc_free_page(fn_copy);
+        free(args);
+        list_remove(&info->elem);
+        free(info);
+        return TID_ERROR;
+    }
+    info->tid = tid;
     return tid;
 }
 
 /* 첫 번째 사용자 프로세스를 실행하는 스레드 함수입니다. */
-static void initd(void* f_name)
+static void initd(void* aux)
 {
+    struct initd_args* args = (struct initd_args*)aux;
+    char* f_name = args->fn_copy;
+
+    /* [수정됨] 자식이 자신의 명찰(info)을 챙김 */
+    thread_current()->my_info = args->info;
+
+    /* 사용한 인자 구조체 해제 */
+    free(args);
 #ifdef VM
     supplemental_page_table_init(&thread_current()->spt);  // VM 모드일 때 보조 페이지 테이블 초기화
 #endif
@@ -108,25 +147,48 @@ tid_t process_fork(const char* name, struct intr_frame* if_ UNUSED)
     sema_init(&fork_data->child_create, 0);
     fork_data->success = false;
 
+    /* 포크 후 부모 자식간의 연결과 부모 자식간의 상호 작용을 위한 구조체  */
+    struct child_info* info = malloc(sizeof(struct child_info));
+    if (info == NULL)
+    {
+        palloc_free_page(fork_data);
+        return TID_ERROR;
+    }
+    info->tid = TID_ERROR;  // 나중에 업데이트
+    info->exit_status = 0;
+    sema_init(&info->wait_sema, 0);
+    // 포그 구조체에 붙여줌
+    fork_data->child_info = info;
+    // 부모 한테 붙여줌
+    list_push_back(&thread_current()->child_info_list, &info->elem);
+
     tid_t child_tid = thread_create(name,  // 새 스레드 이름
                                     PRI_DEFAULT, __do_fork,
                                     fork_data);  // 부모 스레드와 사용자 영역 컨텍스트를 함께 전달
 
     if (child_tid == TID_ERROR)
     {
+        free(info);  // 실패하면 해제
+        palloc_free_page(fork_data);
         return TID_ERROR;
     }
 
+    // 자식이 생성 될 때 까지 대기기
     sema_down(&fork_data->child_create);
 
     /* 복제 성공 여부를 판단한다 */
     bool success = fork_data->success;
-    palloc_free_page(fork_data);  // ✅ 부모가 여기서 해제!
+    palloc_free_page(fork_data);
 
     if (!success)
     {
+        list_remove(&info->elem);
+        free(info);  // 실패하면 해제
         return TID_ERROR;
     }
+
+    // 생성에 성공 했음으로 자식 tid 넣어줌
+    info->tid = child_tid;
 
     /* 자식 프로세스 생성 결과를 돌려준다. */
     return child_tid;
@@ -217,6 +279,9 @@ static void __do_fork(void* aux)
     struct intr_frame* parent_if = fork_data->parent_if;  // 부모의 인터럽트 프레임 포인터
     bool succ = true;                                     // 성공 여부 플래그
 
+    // 자식 한테 child_info 구조체 붙여줌줌
+    current->my_info = fork_data->child_info;
+
     /* 1. Read the cpu context to local stack. */
     /* 1. CPU 컨텍스트를 로컬 스택으로 읽어옵니다. */
 
@@ -295,6 +360,7 @@ static void __do_fork(void* aux)
     }
 error:
     fork_data->success = false;
+    current->my_info = NULL;
     sema_up(&fork_data->child_create);  // 부모에게 완료 신호
     thread_exit();                      // 스레드 종료
 }
@@ -305,8 +371,7 @@ error:
  * 실패 시 -1을 반환합니다. */
 int process_exec(void* f_name)
 {
-    char* file_name = f_name;  // 파일 이름 포인터
-    bool success;              // 성공 여부
+    bool success;  // 성공 여부
 
     /* We cannot use the intr_frame in the thread structure.
      * This is because when current thread rescheduled,
@@ -319,19 +384,27 @@ int process_exec(void* f_name)
     _if.cs = SEL_UCSEG;  // 코드 세그먼트를 사용자 코드 세그먼트로 설정
     _if.eflags = FLAG_IF | FLAG_MBS;  // 인터럽트 플래그와 멀티부트 플래그 설정
 
+    /* file_name을 커널 메모리에 복사 (process_cleanup()에서 페이지 테이블이 파괴되기 전에) */
+    char* fn_copy = palloc_get_page(0);
+    if (fn_copy == NULL) return TID_ERROR;
+    // fn_copy = 'programname args ~'
+    strlcpy(fn_copy, f_name, PGSIZE);
+
     /* We first kill the current context */
     /* 먼저 현재 컨텍스트를 종료합니다 */
     process_cleanup();  // 현재 프로세스의 리소스 정리
 
     /* And then load the binary */
     /* 그 다음 바이너리를 로드합니다 */
-    success = load(file_name, &_if);  // ELF 파일 로드 시도
+    success = load(fn_copy, &_if);  // ELF 파일 로드 시도
 
     /* If load failed, quit. */
     /* 로드에 실패하면 종료합니다. */
-    palloc_free_page(file_name);  // 파일 이름이 저장된 페이지 해제
-    if (!success)                 // 로드 실패 시
-        return -1;                // -1 반환
+    palloc_free_page(fn_copy);  // 파일 이름이 저장된 페이지 해제
+    if (!success)
+    {               // 로드 실패 시
+        return -1;  // -1 반환
+    }
 
     /* Start switched process. */
     /* 전환된 프로세스를 시작합니다. */
@@ -363,32 +436,36 @@ int process_wait(tid_t child_tid)
     /* XXX: 힌트) process_wait(initd)를 호출하면 pintos가 종료되므로,
      * XXX:       process_wait를 구현하기 전에 여기에 무한 루프를 추가하는 것을 권장합니다. */
     struct thread* current = thread_current();
-    struct thread* child = NULL;
+    struct child_info* child_info = NULL;  // thread가 아니라 child_info 포인터여야 함
     struct list_elem* e;
 
     // children 리스트에서 해당 자식 찾기
-    for (e = list_begin(&current->children); e != list_end(&current->children); e = list_next(e))
+    for (e = list_begin(&current->child_info_list); e != list_end(&current->child_info_list);
+         e = list_next(e))
     {
-        struct thread* t = list_entry(e, struct thread, child_elem);
+        struct child_info* t = list_entry(e, struct child_info, elem);
         if (t->tid == child_tid)
         {
-            child = t;
+            child_info = t;
             break;
         }
     }
 
     // 자식을 찾지 못했거나 자신의 자식이 아니면 -1 반환
-    if (child == NULL) return -1;
-
-    // 이미 wait된 자식이면 -1 반환
-    if (child->status == THREAD_BLOCKED) return -1;
+    // (이미 wait된 자식은 children 리스트에서 제거되므로 여기서 -1 반환)
+    if (child_info == NULL) return -1;
 
     // 자식이 종료될 때까지 대기
-    sema_down(&child->wait_sema);
+    // (이미 종료된 자식이면 wait_sema가 이미 up된 상태이므로 즉시 반환됨)
+    sema_down(&child_info->wait_sema);
 
     // 자식의 종료 상태 반환
-    int exit_status = child->exit_status;
-    list_remove(&child->child_elem);  // children 리스트에서 제거
+    int exit_status = child_info->exit_status;
+
+    // printf("%d\n", exit_status);
+    list_remove(&child_info->elem);
+    free(child_info);
+
     return exit_status;
 }
 
@@ -426,6 +503,13 @@ void process_exit(void)
         t->exec_file = NULL;
     }
 
+    /* 1. 부모에게 내 종료 상태 알림 */
+    if (t->my_info != NULL)
+    {
+        t->my_info->exit_status = t->exit_status;
+        sema_up(&t->my_info->wait_sema);
+    }
+
     // 종료 상태 출력
     // sys_exit()을 통해 종료된 경우 이미 출력되었지만,
     // 예외로 종료된 경우(잘못된 메모리 접근 등)를 위해 여기서도 출력
@@ -439,8 +523,15 @@ void process_exit(void)
         printf("%s: exit(%d)\n", t->name, t->exit_status);
     }
 
-    // 대기 중인 부모 프로세스 깨우기
-    sema_up(&t->wait_sema);
+    /* 2. 내가 부모로서 가지고 있던 자식 정보들(고아) 메모리 해제 */
+    while (!list_empty(&t->child_info_list))
+    {
+        struct list_elem* e = list_pop_front(&t->child_info_list);
+        struct child_info* child = list_entry(e, struct child_info, elem);
+        free(child);
+    }
+
+    // printf("부모에게 정보를 넘겨줌");
 
     process_cleanup();  // 프로세스 리소스 정리
 }

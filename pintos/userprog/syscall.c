@@ -278,7 +278,7 @@ static void sys_exec(struct intr_frame *f UNUSED)
     const char *file = (const char *)f->R.rdi;
     // 문자열 유효성 검증
     check_valid_string(file);
-    if (!process_exec((void *)file))
+    if (process_exec((void *)file) == -1)
     {  // 실행에 실패 하면 exit
         thread_current()->exit_status = -1;
         thread_exit();

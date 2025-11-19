@@ -251,7 +251,6 @@ tid_t thread_create(const char *name, int priority, thread_func *function, void 
     /* Add to run queue. */
     thread_unblock(t);
     /* 현재 스레드와 새로 생성된 스레드의 우선순위를 비교하여 양보가 필요하면 실행되도록  */
-    list_push_back(&cur_thread->children, &t->child_elem);
 
     if (t->priority > cur_thread->priority)
     {
@@ -544,9 +543,8 @@ static void init_thread(struct thread *t, const char *name, int priority)
 #ifdef USERPROG
     for (int i = 0; i < MAX_FD; i++) t->fds[i] = NULL;
     t->exec_file = NULL;
+    list_init(&t->child_info_list);
     t->exit_status = 0;
-    sema_init(&t->wait_sema, 0);  // wait_sema 초기화 (0으로 시작)
-    list_init(&t->children);      // children 리스트 초기화
 #endif
 }
 
