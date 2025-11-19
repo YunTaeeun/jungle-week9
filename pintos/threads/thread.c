@@ -11,6 +11,7 @@
 #include "threads/synch.h"
 #include "threads/vaddr.h"
 #include "intrinsic.h"
+#include "filesys/filesys.h"
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
@@ -250,6 +251,20 @@ thread_create (const char *name, int priority,thread_func *function, void *aux) 
 	struct thread *parent = thread_current();		
 	// 부모 자식 리스트에, 자식 연결
 	list_push_back(&parent->child_list, &t->child_elem);
+
+	// 10주차 file 초기화
+	// 각 쓰레드마다 4KB 크기의 fd_table 을 가지고
+	t->fd_table = palloc_get_page(PAL_ZERO);
+	if(t->fd_table == NULL) {
+		palloc_free_page(t);
+		PANIC("Failed to allocate FDT");
+	}
+	t->next_fd = 2; // 0 -> STDIN , 1 -> STDOUT
+	// 0,1 은 표준으로 있으니까 dummy 값 넣어놓기
+	t->fd_table[0] = (void *)1; // dummy
+	t->fd_table[1] = (void *)2; // dummy
+	// 10주차 rox
+	//t->running_file = NULL;
 
 	/* Call the kernel_thread if it scheduled.
 	 * Note) rdi is 1st argument, and rsi is 2nd argument. */

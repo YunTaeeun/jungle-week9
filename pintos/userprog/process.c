@@ -28,11 +28,12 @@ static void process_cleanup (void);
 static bool load (const char *file_name, struct intr_frame *if_);
 static void initd (void *f_name);
 static void __do_fork (void *);
+extern struct lock filesys_lock;
 
 /* General process initializer for initd and other process. */
 static void
 process_init (void) {
-	struct thread *current = thread_current ();
+	struct thread *cur_thread = thread_current ();
 }
 
 /* Starts the first userland program, called "initd", loaded from FILE_NAME.
@@ -206,8 +207,6 @@ process_exec (void *f_name) {
   NOT_REACHED ();
 }
 
-
-
 /* Waits for thread TID to die and returns its exit status.  If
  * it was terminated by the kernel (i.e. killed due to an
  * exception), returns -1.  If TID is invalid or if it was not a
@@ -247,8 +246,6 @@ process_wait (tid_t child_tid UNUSED) {
 	// 부모 child_list에 꽂아둔 chile_elem 삭제
 	list_remove(&search_child->child_elem);
 
-	// 공간 해제
-	// palloc_free_page(search_child);
 
 	return status;
 }
@@ -262,9 +259,33 @@ process_exit (void) {
 	 * TODO: Implement process termination message (see
 	 * TODO: project2/process_termination.html).
 	 * TODO: We recommend you to implement process resource cleanup here. */
-	//sema_up(&temporary);
+	// 쓰레드 죽기 전에, 파일 디스크립터 정리
+	 if(cur_thread->fd_table != NULL) {
+		lock_acquire(&filesys_lock);
+		// 반복문으로 해제하는 이유 -> 해당 쓰레드가 열었던 모든 파일을 닫아야 하기 때문에
+		for(int fd= 2; fd < FDT_LIMIT; fd++) {
+			if(cur_thread->fd_table[fd] != NULL) {
+				file_close(cur_thread->fd_table[fd]);
+				cur_thread->fd_table[fd] = NULL;
+			}
+		}
+		lock_release(&filesys_lock);
+		palloc_free_page(cur_thread->fd_table);
+		cur_thread->fd_table = NULL;
+	 }
+
+	// 10주차 rox
+	//  if (cur_thread->running_file != NULL) {
+  //     lock_acquire(&filesys_lock);
+  //     file_allow_write(cur_thread->running_file);
+  //     file_close(cur_thread->running_file);
+  //     lock_release(&filesys_lock);
+  //     cur_thread->running_file = NULL;
+  //  } 
+	
 	// 자식 쓰레드의 sema 리스트 확인 -> 부모 깨움
 	sema_up(&cur_thread->wait_sema);
+
 	process_cleanup ();
 }
 
@@ -456,12 +477,18 @@ load (const char *file_name, struct intr_frame *if_) {
 		goto done;
 	process_activate (thread_current ());   // 새 페이지 테이블 활성화
 
+	
+
+
 	/* 2️⃣ 실행 파일 열기 */
 	file = filesys_open (program_name);        // 파일 시스템에서 실행 파일 탐색 및 오픈
 	if (file == NULL) {
 		printf ("load: %s: open failed\n", program_name);
 		goto done;
 	}
+	// 10주차 rox
+	// t ->running_file = file;
+	// file_deny_write(file);
 
 	/* 3️⃣ ELF 헤더 읽고 검증 */
 	// 실행 파일이 올바른 ELF 포맷인지 확인
@@ -553,7 +580,14 @@ load (const char *file_name, struct intr_frame *if_) {
 
 done:
 	/* 성공/실패 여부와 관계없이 파일 닫기 */
-	file_close (file);
+	file_close (file); // -> 사용자 프로그램이 exit 시스템 콜 호출해서 종료할거임
+	// 10주차 rox
+	// if(!success) {
+	// 	if(file != NULL) {
+	// 		file_close(file);
+	// 		t->running_file = NULL;
+	// 	}
+	// }
 	palloc_free_page(cmd);
 	return success;
 }

@@ -40,6 +40,7 @@ typedef int tid_t;
                                         /* 기본 우선순위. */
 #define PRI_MAX 63                      /* Highest priority. */
                                         /* 가장 높은 우선순위. */
+#define FDT_LIMIT 128
 
 /* A kernel thread or user process.
  *
@@ -152,6 +153,11 @@ struct thread {
 	struct list child_list; // 부모가 가질 자식들의 리스트
 	struct list_elem child_elem; // 자식이 부모의 리스트에 연결할때 쓸 elem
 	
+	//10 주차 file
+	struct file **fd_table;
+	int next_fd;
+	// 10주차 rox
+	// struct file *running_file;
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
 	// pml4는 스레드가 아니라, 해당 스레드(프로세스)가 사용하는 '가상 메모리 주소록' 그 자체를 가리키는 포인터

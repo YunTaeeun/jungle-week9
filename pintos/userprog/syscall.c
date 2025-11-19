@@ -9,6 +9,10 @@
 #include "intrinsic.h"
 #include "threads/init.h"  // power_off() 함수를 위해 추가
 #include "threads/palloc.h"
+#include "threads/synch.h"
+#include "filesys/file.h"
+#include "devices/input.h"
+#include "filesys/filesys.h"
 
 // 구현 핸들러
 // void halt (void) NO_RETURN;
@@ -28,6 +32,7 @@
 
 void syscall_entry(void);
 void syscall_handler(struct intr_frame *);
+struct lock filesys_lock;
 /* System call.
  *
  * Previously system call services was handled by the interrupt handler
@@ -47,6 +52,7 @@ void syscall_init(void)
      * until the syscall_entry swaps the userland stack to the kernel
      * mode stack. Therefore, we masked the FLAG_FL. */
     write_msr(MSR_SYSCALL_MASK, FLAG_IF | FLAG_TF | FLAG_DF | FLAG_IOPL | FLAG_AC | FLAG_NT);
+    lock_init(&filesys_lock);
 }
 
 /*         유저 메모리 검증 함수들              */
@@ -123,7 +129,6 @@ syscall_handler (struct intr_frame *f)
 {
   /* 시스템 콜 번호는 rax 레지스터에 저장됨 */
   int syscall_num = f->R.rax;
-
   switch (syscall_num)
   {
     case SYS_HALT:    /* Halt the operating system. */
@@ -194,8 +199,13 @@ void sys_exit(struct intr_frame *f)
   thread_exit();
 }
 
-void sys_fork() {}
 
+
+
+void sys_fork(struct intr_frame *f) 
+{
+  f->R.rax = -1;
+}
 
 
 
@@ -253,9 +263,110 @@ void sys_remove(struct intr_frame *f)
     f->R.rax = filesys_remove(file);
 }
 
-void sys_open() {}
-void sys_filesize() {}
-void sys_read() {}
+void sys_open(struct intr_frame *f) 
+{
+  const char *file_name = (const char *)f->R.rdi;
+
+  check_address(file_name);
+
+  char *k_filename = copy_user_string(file_name);
+  if(k_filename == NULL) {
+    f->R.rax = -1;
+    return;
+  }
+  struct thread *cur_thread = thread_current();
+
+  lock_acquire(&filesys_lock);
+  struct file *file = filesys_open(k_filename);
+  lock_release(&filesys_lock);
+
+  palloc_free_page(k_filename);
+
+  if(file == NULL) {
+    f->R.rax = -1;
+    return;
+  }
+
+  int fd = -1;
+  for(int i = 2 ; i < FDT_LIMIT ; i++) {
+    if(cur_thread->fd_table[i] == NULL) {
+      fd = i;
+      cur_thread->fd_table[i] = file;
+      break;
+    }
+  }
+
+  if(fd == -1) {
+    lock_acquire(&filesys_lock);
+    file_close(file);
+    lock_release(&filesys_lock);
+    f->R.rax = -1;
+    return;
+  }
+
+  f->R.rax = fd;
+}
+
+void sys_filesize(struct intr_frame *f) 
+{
+  int fd = f->R.rdi;
+  struct thread *cur_thread = thread_current();
+  
+  if(fd < 2 || fd >= FDT_LIMIT || cur_thread->fd_table[fd] == NULL) {
+    f->R.rax = -1;
+    return;
+  }
+  struct file *file = cur_thread -> fd_table[fd];
+
+  lock_acquire(&filesys_lock);
+  off_t size = file_length(file);
+  lock_release(&filesys_lock);
+
+  f->R.rax = size;
+}
+
+void sys_read(struct intr_frame *f) 
+{
+  int fd = f->R.rdi;
+  void *buffer = (void *)f->R.rsi;
+  unsigned size = f->R.rdx;
+
+  if(size == 0) {
+    f->R.rax = 0;
+    return;
+  }
+
+  check_buffer(buffer, size);
+  if(fd == 0)
+  {
+    for(unsigned i = 0; i < size; i++) {
+      ((uint8_t *)buffer)[i] = input_getc();
+   }
+   f->R.rax = size;
+   return;
+  }
+
+  if(fd == 1) 
+  {
+    f->R.rax = -1;
+    return;
+  }
+
+  struct thread *cur_thread = thread_current();
+  if(fd < 0 || fd >= FDT_LIMIT || cur_thread->fd_table[fd] == NULL)
+  {
+    f->R.rax = -1;
+    return;
+  }
+
+  struct file *file = cur_thread->fd_table[fd];
+
+  lock_acquire(&filesys_lock);
+  int ret = file_read(file, buffer, size);
+  lock_release(&filesys_lock);
+
+  f->R.rax = ret;
+}
 
 void sys_write(struct intr_frame *f)
 {
@@ -263,16 +374,42 @@ void sys_write(struct intr_frame *f)
   int fd = f->R.rdi;                      // 1번 인자 : rdi -> fd (파일 디스크립터)
   const void *buffer = (void *)f->R.rsi;  // 2번 인자 : buffer (출력할 문자의 주소)
   unsigned size = f->R.rdx;               // 3번 인자 : size (출력할 문자의 길이)
+
+  if(size == 0) {
+    f->R.rax = 0;
+    return;
+  }
+
 	check_buffer(buffer, size);							// 사용자가 넘겨준 buffer 주소를 읽어도 되는지 확인
+
+  if(fd == 0) 
+  {
+    f->R.rax = -1;
+    return;
+  }
+  
+  struct thread *cur_thread = thread_current();
+
+  if(fd < 0 || fd >= FDT_LIMIT || cur_thread->fd_table[fd] == NULL)
+  {
+    f->R.rax = -1;
+    return;
+  }
+
   if (fd == 1)
   {                          
   	putbuf(buffer, size);  // 버퍼를 콘솔에 출력
     f->R.rax = size;       
+    return;
   }
-  else
-  {
-    f->R.rax = -1;  // 다른 fd는 아직 미구현
-  }
+
+  // 분기처리 완료 -> 파일 쓰기 처리
+  struct file *file = cur_thread->fd_table[fd];
+  lock_acquire(&filesys_lock);
+  int ret = file_write(file, buffer, size);
+  lock_release(&filesys_lock);
+
+  f->R.rax = ret;
 }
 
 void sys_seek() {}
