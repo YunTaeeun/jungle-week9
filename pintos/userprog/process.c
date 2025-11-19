@@ -278,7 +278,6 @@ static void __do_fork(void *aux)
 	memcpy(&if_, parent_if, sizeof(struct intr_frame));
 	if_.R.rax = 0; // 자식 프로세스의 입장에서 fork()의 반환값을 0으로 설정
 
-	/* 2. 페이지 테이블을 복제합니다 */
 	current->pml4 = pml4_create();
 	if (current->pml4 == NULL)
 		goto error;
@@ -289,18 +288,20 @@ static void __do_fork(void *aux)
 	if (!supplemental_page_table_copy(&current->spt, &parent->spt))
 		goto error;
 #else
+	/* 2. 페이지 테이블을 복제합니다 */
 	if (!pml4_for_each(parent->pml4, duplicate_pte, parent))
 		goto error;
 #endif
 
 	process_init();
+	/* 3. 파일 디스크립터 테이블(FDT) 복사 */
 	if (!duplicate_fdt(parent, current))
 		goto error; // 복제 실패시 에러처리 후 자동 롤백
 
 	/* 수행 성공을 저장 */
 	args->success = true;
 
-	/* 부모 스레드, 자식 리스트 저장 */
+	/* 부모 - 자식 관계 설정 (wait때 사용) */
 	current->parent = parent;
 	list_push_back(&parent->child_list, &current->child_elem);
 
