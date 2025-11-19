@@ -338,7 +338,7 @@ int process_exec(void *f_name)
 
 	/* 2. 현재 컨텍스트(메모리 공간, pml4)를 정리(파괴)하여
 	 * 새 유저 프로세스로 '변신'할 준비를 함. */
-	process_cleanup();
+	process_cleanup(); // 코드, 데이터, 스택 영역 삭제
 
 	/* 3. load() 함수를 호출하여 새 프로그램을 메모리에 적재. */
 	// printf("===> load.\n");
@@ -350,7 +350,8 @@ int process_exec(void *f_name)
 	palloc_free_page(file_name);
 
 	if (!success)
-		return -1; // 로드 실패 (예: 파일 없음, 메모리 부족 등)
+		exit(-1); // 로드 실패했으나 이미 이 프로그램의 메모리 cleanup된 상태. 유저
+			  // 프로그램의 rip에 가리키는 주소가 없음. 치명적 오류로 exit(-1)
 
 	/* 5. do_iret()을 호출하여 유저 모드로 전환.
 	 * CPU 레지스터가 _if에 설정된 값(rip, rsp 등)으로 갱신되며,
@@ -685,7 +686,7 @@ static bool load(const char *file_name, struct intr_frame *if_)
 	/* 2️⃣ 실행 파일 열기 */
 	file = filesys_open(program_name); // 파일 시스템에서 실행 파일 탐색 및 오픈
 	if (file == NULL) {
-		// printf ("load: %s: open failed\n", program_name);
+		printf("load: %s: open failed\n", program_name);
 		goto done;
 	}
 
@@ -775,8 +776,6 @@ static bool load(const char *file_name, struct intr_frame *if_)
 	/* 6️⃣ 실행 시작 주소 설정 */
 	if_->rip = ehdr.e_entry; // ELF 진입점 (main 함수 시작 주소)
 
-	/* TODO: 인자 전달 구현 (argument passing) */
-	// - 프로젝트 2에서 argv, argc 스택에 적재하는 부분 구현 예정
 	success = arg_load_stack(file_name, if_);
 
 	// success = true;

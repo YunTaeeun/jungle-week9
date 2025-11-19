@@ -85,7 +85,7 @@ void syscall_handler(struct intr_frame *f UNUSED)
 		exit((int)arg1);
 		break;
 	case SYS_FORK:
-		current_syscall_frame = f;
+		current_syscall_frame = f; // 현재 프로세스의 CPU 레지스터 상태
 		pid_t pid = fork((const char *)arg1);
 		f->R.rax = pid; // 부모 프로세스의 입장에서 반환값을 pid로 설정
 		break;
@@ -172,7 +172,7 @@ int open(const char *file)
 	// 2. syscall.함수에 초기화 함수 정의
 	// 3. thread 구조체에 struct fd_table *fdt; 멤버 추가 및 init_thread()에서 NULL로 초기화
 	// 4. process_exit()에서 남은 fd 모두 file_close - free(td_table)
-	// TODO: 5. fork시 부모테이블 복사 > 각 file 객체 recnt++ (?).. 일단 보류.
+	// 5. fork시 부모테이블 복사 > 각 file 객체 recnt++ (?).. 일단 보류.
 
 	// [1] open함수
 	// 0. 널포인터 검증 후 exit(-1)
@@ -296,7 +296,27 @@ int wait(pid_t child_tid)
 
 int exec(const char *file)
 {
-	return process_exec(file);
+	// 0. 널포인터 검증 후 exit(-1)
+	if (file == NULL)
+		exit(-1);
+
+	// 1. 보안을 위해 시작 주소 검증
+	if (!is_valid_user_memory(file))
+		exit(-1);
+
+	// 2. 유저메모리에 있던 파일명을 커널메모리로 복사 (동적할당)
+	const char *kernel_file = copy_string_from_user_to_kernel(file);
+	if (kernel_file == NULL || (strlen(kernel_file) == 0)) {
+		palloc_free_page(kernel_file);
+		return false;
+	}
+
+	int result = process_exec(kernel_file);
+
+	// 메모리 해제
+	palloc_free_page(kernel_file);
+
+	return result;
 }
 
 // 시스템 종료
@@ -312,7 +332,7 @@ void exit(int status)
 	curr->exit_status = status; // 종료 상태 저장 (wait에서 사용)
 
 	// 스레드 종료
-	printf("%s: exit(%d)\n", curr->name, status);
+	printf("%s: exit(%d)\n", curr->name, curr->exit_status);
 	thread_exit();
 }
 
@@ -410,8 +430,26 @@ int filesize(int fd)
 
 pid_t fork(const char *thread_name)
 {
-	tid_t pid = process_fork(thread_name, current_syscall_frame);
+	// 0. 널포인터 검증 후 exit(-1)
+	if (thread_name == NULL)
+		exit(-1);
+
+	// 1. 보안을 위해 시작 주소 검증
+	if (!is_valid_user_memory(thread_name))
+		exit(-1);
+
+	// 2. 유저메모리에 있던 파일명을 커널메모리로 복사 (동적할당)
+	const char *kernel_thread_name = copy_string_from_user_to_kernel(thread_name);
+	if (kernel_thread_name == NULL || (strlen(kernel_thread_name) == 0)) {
+		palloc_free_page(kernel_thread_name);
+		return false;
+	}
+
+	tid_t pid = process_fork(kernel_thread_name, current_syscall_frame);
+	palloc_free_page(kernel_thread_name);
+
 	if (pid == TID_ERROR)
 		return -1;
+
 	return pid;
 }

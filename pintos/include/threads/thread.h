@@ -140,7 +140,7 @@ struct thread {
 	struct lock *waiting_lock; // 내가 기다리는 락
 
 	/* system call에서 사용 */
-	struct semaphore dead; // wait용
+	struct semaphore dead; // wait/exit용. 자식 죽을 때까지 부모 기다리는 용도.
 	struct list child_list;
 	struct list_elem child_elem;
 	bool waited;
