@@ -17,4 +17,6 @@ typedef int pid_t;
 
 void syscall_init(void);
 
+extern struct lock filesys_lock; // syscall.c, process.c에서 사용
+
 #endif /* userprog/syscall.h */

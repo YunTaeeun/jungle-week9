@@ -20,7 +20,6 @@ void syscall_handler(struct intr_frame *);
 bool is_valid_user_memory(void *ptr);
 bool is_valid_buffer(const void *buffer, unsigned length);
 static char *copy_string_from_user_to_kernel(const char *ustr);
-// void create_fd_table(struct fd_table *);
 
 /* 시스템콜 함수 선언 */
 void halt(void);
@@ -34,7 +33,7 @@ int open(const char *file);
 void close(int fd);
 
 static struct intr_frame *current_syscall_frame;
-static struct lock filesys_lock;
+struct lock filesys_lock;
 
 #define FILE_NAME_MAX 14 /* filesys.c의 NAME_MAX와 동일 */
 

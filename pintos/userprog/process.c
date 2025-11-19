@@ -28,6 +28,7 @@ static struct semaphore initial;
 static void process_cleanup(void);
 static bool load(const char *file_name, struct intr_frame *if_);
 static void initd(void *f_name);
+static bool duplicate_fdt(struct thread *parent, struct thread *child);
 static void __do_fork(void *);
 struct thread *find_child(tid_t);
 
@@ -43,8 +44,8 @@ static void process_init(void)
 		PANIC("fd_table allocation failed");
 
 	// fd table 초기화
-	fdt->files =
-	    palloc_get_multiple(PAL_ZERO, DIV_ROUND_UP(32 * sizeof(struct file *), PGSIZE));
+	fdt->files = palloc_get_multiple(
+	    PAL_ZERO, DIV_ROUND_UP(FD_INITIAL_CAPACITY * sizeof(struct file *), PGSIZE));
 	fdt->capacity = FD_INITIAL_CAPACITY;
 	fdt->next_fd = 3;
 	fdt->magic = FILE_FD_MAGIC;
@@ -208,7 +209,62 @@ static bool duplicate_pte(uint64_t *pte, void *va, void *aux)
 }
 #endif
 
-/* 부모의 실행 컨텍스트를 복사하는 스레드 함수 */
+static bool duplicate_fdt(struct thread *parent, struct thread *child)
+{
+	// 1. null 체크
+	if (parent->fdt == NULL)
+		return true; // 커널 스레드
+
+	struct fd_table *parent_fdt = parent->fdt;
+	struct fd_table *child_fdt = child->fdt;
+
+	// 2. 부모보다 capacity 작으면 동일하게 확장
+	if (child_fdt->capacity < parent_fdt->capacity) {
+		int new_pages = DIV_ROUND_UP(parent_fdt->capacity * sizeof(struct file *), PGSIZE);
+		struct file **new = palloc_get_multiple(PAL_ZERO, new_pages);
+		memcpy(new, parent_fdt->files, parent_fdt->capacity * sizeof(struct file *));
+
+		// 기존 페이지 free
+		palloc_free_multiple(
+		    child_fdt->files,
+		    DIV_ROUND_UP(child_fdt->capacity * sizeof(struct file *), PGSIZE));
+
+		// 테이블 포인터 변경
+		child_fdt->files = new;
+
+		// capacity 변경
+		child_fdt->capacity = parent_fdt->capacity;
+	}
+
+	// 3. fd 복제
+	lock_acquire(&filesys_lock);
+
+	for (int fd = 3; fd < parent_fdt->capacity; fd++) {
+		if (parent_fdt->files[fd] != NULL) {
+			child_fdt->files[fd] = file_duplicate(parent_fdt->files[fd]);
+			if (child_fdt->files[fd] == NULL) {
+				// 복제 실패
+				lock_release(&filesys_lock);
+				return false; // 롤백은 process_exit()에서 자동처리됨
+			}
+		}
+	}
+
+	lock_release(&filesys_lock);
+
+	// 4. next_fd 동기화
+	child_fdt->next_fd = parent_fdt->next_fd;
+
+	return true;
+}
+
+/* 부모의 실행 컨텍스트를 복사하는 스레드 함수
+ * - CPU 컨텍스트 복제
+ * - 페이지 테이블 복제
+ * - 부모-자식 관계 설정
+ * - 에러 핸들링
+ */
+
 static void __do_fork(void *aux)
 {
 	struct fork_args *args = (struct fork_args *)aux;
@@ -237,12 +293,9 @@ static void __do_fork(void *aux)
 		goto error;
 #endif
 
-	// TODO: 파일 복제
-	//   if (파일_복제_실패) {
-	//       succ = false;
-	//       goto error;
-	//   }
 	process_init();
+	if (!duplicate_fdt(parent, current))
+		goto error; // 복제 실패시 에러처리 후 자동 롤백
 
 	/* 수행 성공을 저장 */
 	args->success = true;
@@ -400,6 +453,7 @@ void process_exit(void)
 {
 	struct thread *curr = thread_current();
 
+	/* 1. 파일 정리 */
 	/* fd table 매직넘버 확인 */
 	if (curr->fdt->magic != FILE_FD_MAGIC)
 		return -1;
@@ -417,7 +471,8 @@ void process_exit(void)
 	int pages = DIV_ROUND_UP(curr->fdt->capacity * sizeof(struct file *), PGSIZE);
 	palloc_free_multiple(curr->fdt->files, pages);
 
-	/*  부모가 있는 경우 (fork로 생성된 프로세스) */
+	/* 2. 부모에게 알리기 */
+	/* 부모가 있는 경우 (fork로 생성된 프로세스) */
 	if (curr->parent != NULL && curr->parent->status != THREAD_DYING) {
 		sema_up(&curr->dead);
 	}
