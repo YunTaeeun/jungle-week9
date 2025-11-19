@@ -103,31 +103,21 @@ tid_t process_fork(const char* name, struct intr_frame* if_ UNUSED)
 
     if (fork_data == NULL) return TID_ERROR;
 
-    printf("process_fork1\n");
-
     fork_data->parent = thread_current();
     fork_data->parent_if = if_;
     sema_init(&fork_data->child_create, 0);
     fork_data->success = false;
 
-    printf("process_fork2\n");
-
     tid_t child_tid = thread_create(name,  // 새 스레드 이름
                                     PRI_DEFAULT, __do_fork,
                                     fork_data);  // 부모 스레드와 사용자 영역 컨텍스트를 함께 전달
-
-    printf("process_fork3\n");
 
     if (child_tid == TID_ERROR)
     {
         return TID_ERROR;
     }
 
-    printf("process_fork4\n");
-
     sema_down(&fork_data->child_create);
-
-    printf("process_fork5\n");
 
     /* 복제 성공 여부를 판단한다 */
     bool success = fork_data->success;
@@ -155,16 +145,12 @@ static bool duplicate_pte(uint64_t* pte, void* va, void* aux)
     void* newpage;                                // 새로 할당할 페이지 주소
     bool writable;                                // 페이지 쓰기 가능 여부
 
-    printf("duplicate_pte1\n");
-
     /* 1. TODO: If the parent_page is kernel page, then return immediately. */
     /* 1. TODO: parent_page가 커널 페이지이면 즉시 반환합니다. */
     if (!is_user_pte(pte))
     {
         return true;
     }
-
-    printf("duplicate_pte1.2\n");
 
     /* 2. Resolve VA from the parent's page map level 4. */
     /* 2. 부모의 페이지 맵 레벨 4에서 VA를 해석합니다. */
@@ -174,7 +160,6 @@ static bool duplicate_pte(uint64_t* pte, void* va, void* aux)
     {
         return false;
     }
-    printf("duplicate_pte1.5\n");
 
     /* 3. TODO: Allocate new PAL_USER page for the child and set result to
      *    TODO: NEWPAGE. */
@@ -185,7 +170,6 @@ static bool duplicate_pte(uint64_t* pte, void* va, void* aux)
         return false;
     }
 
-    printf("duplicate_pte2\n");
     /* 4. TODO: Duplicate parent's page to the new page and
      *    TODO: check whether parent's page is writable or not (set WRITABLE
      *    TODO: according to the result). */
@@ -194,15 +178,11 @@ static bool duplicate_pte(uint64_t* pte, void* va, void* aux)
 
     // 부모 페이지 테이블로 전환
 
-    printf("duplicate_pte3\n");
-
     // 부모의 가상 주소에서 데이터 읽기
     memcpy(newpage, parent_page, PGSIZE);  // parent_page는 커널 가상 주소
 
     // 자식 페이지 테이블로 다시 전환
     writable = is_writable(pte);  // PTE_W 플래그 확인
-
-    printf("duplicate_pte4\n");
 
     /* 5. Add new page to child's page table at address VA with WRITABLE
      *    permission. */
@@ -213,7 +193,6 @@ static bool duplicate_pte(uint64_t* pte, void* va, void* aux)
         /* 6. TODO: 페이지 삽입에 실패하면 에러 처리를 수행합니다. */
         palloc_free_page(newpage);
 
-        printf("duplicate_pte5\n");
         return false;
     }
     return true;  // 성공 반환
@@ -241,8 +220,6 @@ static void __do_fork(void* aux)
     /* 1. Read the cpu context to local stack. */
     /* 1. CPU 컨텍스트를 로컬 스택으로 읽어옵니다. */
 
-    printf("__do_fork1\n");
-
     memcpy(&if_, parent_if,
            sizeof(struct intr_frame));  // 부모의 인터럽트 프레임을 자식의 인터럽트 프레임으로 복사
 
@@ -251,9 +228,8 @@ static void __do_fork(void* aux)
     current->pml4 = pml4_create();  // 자식을 위한 새로운 페이지 테이블 생성
     if (current->pml4 == NULL)      // 생성 실패 시
         goto error;                 // 에러 처리로 이동
-    // process_activate(current);      // 자식 프로세스의 페이지 테이블 활성화
+        // process_activate(current);      // 자식 프로세스의 페이지 테이블 활성화
 
-    printf("__do_fork2\n");
 #ifdef VM
     supplemental_page_table_init(&current->spt);  // VM 모드일 때 자식의 보조 페이지 테이블 초기화
     if (!supplemental_page_table_copy(&current->spt,
@@ -269,7 +245,6 @@ static void __do_fork(void* aux)
     process_activate(current);  // 자식으로 복귀
 #endif
 
-    printf("__do_fork3\n");
     /* TODO: Your code goes here.
      * TODO: Hint) To duplicate the file object, use `file_duplicate`
      * TODO:       in include/filesys/file.h. Note that parent should not return
@@ -306,25 +281,19 @@ static void __do_fork(void* aux)
             current->fds[i] = NULL;
         }
     }
-    printf("__do_fork4\n");
     // 부모-자식 관계 설정
     process_init();  // 프로세스 초기화
-
-    printf("__do_fork5\n");
 
     /* Finally, switch to the newly created process. */
     /* 마지막으로, 새로 생성된 프로세스로 전환합니다. */
     if (succ)
     {  // 성공한 경우
-        printf("__do_fork6\n");
         if_.R.rax = 0;
         fork_data->success = true;
         sema_up(&fork_data->child_create);  // 부모에게 완료 신호
-        printf("__do_fork6.5\n");
         do_iret(&if_);  // 인터럽트 복귀를 통해 새 프로세스 실행 시작
     }
 error:
-    printf("__do_fork7\n");
     fork_data->success = false;
     sema_up(&fork_data->child_create);  // 부모에게 완료 신호
     thread_exit();                      // 스레드 종료
@@ -350,26 +319,19 @@ int process_exec(void* f_name)
     _if.cs = SEL_UCSEG;  // 코드 세그먼트를 사용자 코드 세그먼트로 설정
     _if.eflags = FLAG_IF | FLAG_MBS;  // 인터럽트 플래그와 멀티부트 플래그 설정
 
-    printf("process_exec1\n");
     /* We first kill the current context */
     /* 먼저 현재 컨텍스트를 종료합니다 */
     process_cleanup();  // 현재 프로세스의 리소스 정리
 
-    printf("process_exec2\n");
-
     /* And then load the binary */
     /* 그 다음 바이너리를 로드합니다 */
     success = load(file_name, &_if);  // ELF 파일 로드 시도
-
-    printf("process_exec3\n");
 
     /* If load failed, quit. */
     /* 로드에 실패하면 종료합니다. */
     palloc_free_page(file_name);  // 파일 이름이 저장된 페이지 해제
     if (!success)                 // 로드 실패 시
         return -1;                // -1 반환
-
-    printf("process_exec4\n");
 
     /* Start switched process. */
     /* 전환된 프로세스를 시작합니다. */
@@ -621,8 +583,6 @@ static bool load(const char* file_name, struct intr_frame* if_)
     char** argv = NULL;
     uintptr_t* argv_addrs = NULL;
 
-    printf("load1\n");
-
     fn_copy = palloc_get_page(0);
     if (fn_copy == NULL) return false;
 
@@ -647,8 +607,6 @@ static bool load(const char* file_name, struct intr_frame* if_)
     /* file_name을 복사 (strtok_r이 원본을 수정하므로) */
     strlcpy(fn_copy, file_name, LOADER_ARGS_LEN);
 
-    printf("load2\n");
-
     /* 공백으로 인자 파싱 */
     for (token = strtok_r(fn_copy, " ", &save_ptr); token != NULL;
          token = strtok_r(NULL, " ", &save_ptr))
@@ -667,10 +625,6 @@ static bool load(const char* file_name, struct intr_frame* if_)
 
     process_activate(thread_current());  // 현재 스레드의 페이지 테이블 활성화
 
-    printf("load3\n");
-
-    printf("%s\n", argv[0]);
-
     /* Open executable file. */
     /* 실행 파일을 엽니다. */
     file = filesys_open(argv[0]);  // 파일 시스템에서 파일 열기
@@ -679,8 +633,6 @@ static bool load(const char* file_name, struct intr_frame* if_)
         printf("load: %s: open failed\n", argv[0]);  // 에러 메시지 출력
         goto done;                                   // 종료 처리로 이동
     }
-
-    printf("load4\n");
 
     file_deny_write(file);  // 현재 연 파일에 대헤 수정 금지
     t->exec_file = file;
