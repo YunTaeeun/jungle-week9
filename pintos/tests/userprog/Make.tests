@@ -17,10 +17,18 @@ fork-recursive fork-read fork-close fork-boundary exec-once exec-arg \
 exec-boundary exec-missing exec-bad-ptr exec-read wait-simple wait-twice		\
 wait-killed wait-bad-pid multi-recurse multi-child-fd       \
 rox-simple rox-child rox-multichild bad-read bad-write bad-read2 bad-write2  \
-bad-jump bad-jump2)
+bad-jump bad-jump2 dup2/dup2-simple dup2/dup2-complex)
 
 tests/userprog_PROGS = $(tests/userprog_TESTS) $(addprefix \
 tests/userprog/,child-simple child-args child-bad child-close child-rox child-read)
+
+tests/userprog/dup2/dup2-simple_SRC = tests/userprog/dup2/dup2-simple.c \
+tests/userprog/boundary.c
+tests/userprog/dup2/dup2-simple_PUTFILES += tests/userprog/dup2/sample.txt
+
+tests/userprog/dup2/dup2-complex_SRC = tests/userprog/dup2/dup2-complex.c \
+tests/userprog/boundary.c
+tests/userprog/dup2/dup2-complex_PUTFILES += tests/userprog/dup2/sample.txt
 
 tests/userprog/args-none_SRC = tests/userprog/args.c
 tests/userprog/args-single_SRC = tests/userprog/args.c

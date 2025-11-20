@@ -24,7 +24,7 @@ enum thread_status
                     /* 곧 파괴될 예정인 스레드. */
 };
 
-#define MAX_FD 136  // 파일 디스크립터를 위한 값
+#define MAX_FD 512  // 파일 디스크립터를 위한 값
 
 /* Thread identifier type.
    You can redefine this to whatever type you like. */
@@ -149,8 +149,8 @@ struct thread
     int exit_status;
 
     // 파일 관리
-    struct file* fds[MAX_FD];  // 파일 디스크립터
-    struct file* exec_file;    // 실행 중인 파일 (deny write용)
+    struct file** fds;       // 파일 디스크립터
+    struct file* exec_file;  // 실행 중인 파일 (deny write용)
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem; /* List element. */

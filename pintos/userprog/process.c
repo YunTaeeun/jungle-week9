@@ -243,7 +243,6 @@ static bool duplicate_pte(uint64_t* pte, void* va, void* aux)
     // 부모의 가상 주소에서 데이터 읽기
     memcpy(newpage, parent_page, PGSIZE);  // parent_page는 커널 가상 주소
 
-    // 자식 페이지 테이블로 다시 전환
     writable = is_writable(pte);  // PTE_W 플래그 확인
 
     /* 5. Add new page to child's page table at address VA with WRITABLE
@@ -323,29 +322,33 @@ static void __do_fork(void* aux)
     /* 파일 디스크립터 복제 */
     for (int i = 0; i < MAX_FD; i++)
     {
-        if (parent->fds[i] != NULL)
+        struct file* file = parent->fds[i];
+        if (file == NULL)
         {
-            current->fds[i] = file_duplicate(parent->fds[i]);
+            current->fds[i] = NULL;
+            continue;
+        }
+
+        /* 표준 입출력 마커(1, 2)는 복제하지 않고 값만 복사 */
+        if (file == (void*)1 || file == (void*)2)
+        {
+            current->fds[i] = file;  // 값만 복사
+        }
+        else
+        {
+            /* 일반 파일만 duplicate 수행 */
+            current->fds[i] = file_duplicate(file);
+
+            /* 에러 처리 */
             if (current->fds[i] == NULL)
             {
-                /* file_duplicate 실패 시 이미 복제된 파일들 정리 */
-                for (int j = 0; j < i; j++)
-                {
-                    if (current->fds[j] != NULL)
-                    {
-                        file_close(current->fds[j]);
-                        current->fds[j] = NULL;
-                    }
-                }
+                // 여기서는 succ = false 처리
                 succ = false;
                 goto error;
             }
         }
-        else
-        {
-            current->fds[i] = NULL;
-        }
     }
+
     // 부모-자식 관계 설정
     process_init();  // 프로세스 초기화
 
@@ -455,6 +458,8 @@ int process_wait(tid_t child_tid)
     // (이미 wait된 자식은 children 리스트에서 제거되므로 여기서 -1 반환)
     if (child_info == NULL) return -1;
 
+    /*두번쨰 wait 되는거 방지, 인터럽트 꺼야됨?*/
+
     // 자식이 종료될 때까지 대기
     // (이미 종료된 자식이면 wait_sema가 이미 up된 상태이므로 즉시 반환됨)
     sema_down(&child_info->wait_sema);
@@ -484,16 +489,33 @@ void process_exit(void)
 
     struct thread* t = thread_current();
 
-    // 파일 디스크립터 정리
-    // 모든 열린 파일 닫기
-    for (int i = 2; i < MAX_FD; i++)
+    /* 파일 디스크립터 정리 */
+    // 모든 열린 파일 닫기 STDIN(0), STDOUT(1) 포함
+
+    for (int i = 0; i < MAX_FD; i++)
     {
-        if (t->fds[i] != NULL)
+        struct file* file = t->fds[i];
+
+        if (file != NULL && file != (struct file*)1 && file != (struct file*)2)
         {
-            file_close(t->fds[i]);
-            t->fds[i] = NULL;
+            /* 이미 닫힌 파일이거나 표준 입출력 마커면 패스 */
+            /* STDIN_VAL, STDOUT_VAL 체크 추가 */
+
+            file_close(file);
+            t->fds[i] = NULL;  // 현재 FD 닫음
+
+            /* [핵심] 현재 닫은 파일과 같은 주소를 가리키는 다른 FD들도 모두 NULL로 만듦 */
+            for (int j = i + 1; j < MAX_FD; j++)
+            {
+                if (t->fds[j] == file)
+                {
+                    t->fds[j] = NULL;  // 미리 지워서 나중에 또 닫지 않게 함
+                }
+            }
         }
     }
+    // 할당했던 fds 반환
+    palloc_free_page(t->fds);
 
     // 실행 파일에 대한 쓰기 허용
     if (t->exec_file != NULL)

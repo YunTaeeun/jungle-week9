@@ -237,6 +237,17 @@ tid_t thread_create(const char *name, int priority, thread_func *function, void 
     init_thread(t, name, priority);
     tid = t->tid = allocate_tid();
 
+#ifdef USERPROG
+    t->fds = palloc_get_page(PAL_ZERO);  // 0으로 초기화된 4KB 할당
+    if (t->fds == NULL)
+    {
+        return TID_ERROR;
+    }
+    /* 표준 입출력 초기화 (값 1, 2는 STDIN_VAL, STDOUT_VAL과 같음) */
+    t->fds[0] = (void *)1;
+    t->fds[1] = (void *)2;
+#endif
+
     /* Call the kernel_thread if it scheduled.
      * Note) rdi is 1st argument, and rsi is 2nd argument. */
     t->tf.rip = (uintptr_t)kernel_thread;
@@ -541,7 +552,7 @@ static void init_thread(struct thread *t, const char *name, int priority)
     t->waiting_lock = NULL;
     list_init(&t->holding_locks);
 #ifdef USERPROG
-    for (int i = 0; i < MAX_FD; i++) t->fds[i] = NULL;
+    t->fds = NULL;
     t->exec_file = NULL;
     list_init(&t->child_info_list);
     t->exit_status = 0;
