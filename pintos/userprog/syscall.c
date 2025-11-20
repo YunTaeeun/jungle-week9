@@ -16,6 +16,8 @@
 #include "filesys/file.h"
 #include "devices/input.h"  // 입력 관련 함수 사용을 위함
 
+#define STDIN_VAL ((struct file *)1)   // 파일 디스크립터 0,1번 오픈
+#define STDOUT_VAL ((struct file *)2)  // 파일 디스크립터 0,1번 오픈
 static struct lock filesys_lock;
 
 void syscall_entry(void);
@@ -357,7 +359,12 @@ static void sys_filesize(struct intr_frame *f UNUSED)
     int fd = f->R.rdi;
     struct thread *t = thread_current();
     // 확인할 파일이 있으면
-    if (fd < 2 || fd >= MAX_FD || t->fds[fd] == NULL)
+    if (fd < 0 || fd >= MAX_FD || t->fds[fd] == NULL)
+    {
+        f->R.rax = -1;
+        return;
+    }
+    if (t->fds[fd] == STDIN_VAL || t->fds[fd] == STDOUT_VAL)
     {
         f->R.rax = -1;
         return;
@@ -376,7 +383,15 @@ static void sys_read(struct intr_frame *f UNUSED)
     check_valid_buffer(buffer, length, true);
 
     struct thread *t = thread_current();
-    if (fd == 0)
+
+    // 범위 채크
+    if (fd < 0 || fd >= MAX_FD || t->fds[fd] == NULL)
+    {
+        f->R.rax = -1;
+        return;
+    }
+
+    if (t->fds[fd] == STDIN_VAL)
     {  // 일반 입력 상황 처리
         uint8_t *buf = (uint8_t *)buffer;
         unsigned i;
@@ -387,8 +402,9 @@ static void sys_read(struct intr_frame *f UNUSED)
         f->R.rax = i;
         return;
     }
-    else if (fd < 0 || fd >= MAX_FD || t->fds[fd] == NULL)
-    {  // 범위 오류시 -1
+    /* 2. 표준 출력 마커인 경우 -> 읽기 불가 */
+    if (t->fds[fd] == STDOUT_VAL)
+    {
         f->R.rax = -1;
         return;
     }
@@ -407,20 +423,29 @@ static void sys_write(struct intr_frame *f UNUSED)
     // 버퍼 전체 영역의 유효성을 검증
     check_valid_buffer(buffer, size, false);
 
-    if (fd == 1)
+    struct thread *t = thread_current();
+
+    if (fd < 0 || fd >= MAX_FD || t->fds[fd] == NULL)
+    {
+        f->R.rax = -1;
+        return;
+    }
+    if (t->fds[fd] == STDOUT_VAL)
     {
         putbuf(buffer, size);  // 버퍼를 콘솔에 출력
         f->R.rax = size;       // 반환값: 쓴 바이트 수
         return;
     }
-    else if (fd >= 2 && fd < MAX_FD && thread_current()->fds[fd] != NULL)
+    /* 2. 표준 입력 마커인 경우 -> 쓰기 불가 */
+    if (t->fds[fd] == STDIN_VAL)
     {
-        lock_acquire(&filesys_lock);
-        f->R.rax = file_write(thread_current()->fds[fd], buffer, size);
-        lock_release(&filesys_lock);
+        f->R.rax = -1;
         return;
     }
-    f->R.rax = -1;
+    /* 3. 일반 파일인 경우 -> 파일 쓰기 */
+    lock_acquire(&filesys_lock);
+    f->R.rax = file_write(t->fds[fd], buffer, size);
+    lock_release(&filesys_lock);
 }
 
 static void sys_seek(struct intr_frame *f UNUSED)
@@ -429,7 +454,11 @@ static void sys_seek(struct intr_frame *f UNUSED)
     unsigned position = f->R.rsi;
     struct thread *t = thread_current();
 
-    if (fd < 2 || fd >= MAX_FD || t->fds[fd] == NULL)
+    if (fd < 0 || fd >= MAX_FD || t->fds[fd] == NULL)
+    {
+        return;
+    }
+    if (t->fds[fd] == STDIN_VAL || t->fds[fd] == STDOUT_VAL)
     {
         return;
     }
@@ -443,7 +472,12 @@ static void sys_tell(struct intr_frame *f UNUSED)
     int fd = f->R.rdi;
     struct thread *t = thread_current();
 
-    if (fd < 2 || fd >= MAX_FD || t->fds[fd] == NULL)
+    if (fd < 0 || fd >= MAX_FD || t->fds[fd] == NULL)
+    {
+        f->R.rax = -1;
+        return;
+    }
+    if (t->fds[fd] == STDIN_VAL || t->fds[fd] == STDOUT_VAL)
     {
         f->R.rax = -1;
         return;
@@ -457,19 +491,101 @@ static void sys_close(struct intr_frame *f UNUSED)
 {
     int fd = f->R.rdi;
     struct thread *t = thread_current();
-    if (fd < 2 || fd >= MAX_FD || t->fds[fd] == NULL)
+    if (fd < 0 || fd >= MAX_FD || t->fds[fd] == NULL)
     {
         return;
     }
-    // 파일 닫고
-    lock_acquire(&filesys_lock);
-    file_close(t->fds[fd]);
-    lock_release(&filesys_lock);
+
+    if (t->fds[fd] == STDIN_VAL || t->fds[fd] == STDOUT_VAL)
+    {
+        t->fds[fd] = NULL;
+        return;
+    }
+
+    /* 3. 참조 카운팅: 나 말고 누가 또 쓰나? (안전장치) */
+    bool is_shared = false;
+    for (int i = 0; i < MAX_FD; i++)
+    {
+        if (i == fd) continue;  // 나는 제외
+        if (t->fds[i] == t->fds[fd])
+        {
+            is_shared = true;  // 누군가 공유 중!
+            break;
+        }
+    }
+
+    /* 4. 아무도 안 쓸 때만 진짜 닫기 (메모리 해제) */
+    if (!is_shared)
+    {
+        lock_acquire(&filesys_lock);
+        file_close(t->fds[fd]);
+        lock_release(&filesys_lock);
+    }
     // 닫은 슬롯 초기화 해줘야함
     t->fds[fd] = NULL;
 }
 
+// int dup2(int oldfd, int newfd);
 static void sys_dup2(struct intr_frame *f UNUSED)
 {
-    /* TODO: implement dup2 (optional) */
+    int old_fd = f->R.rdi;                // 원본 파일
+    int new_fd = f->R.rsi;                // 복제 당할 파일
+    struct thread *t = thread_current();  // 스레드
+    if (old_fd < 0 || old_fd >= MAX_FD)
+    {  // 범위 채크
+        f->R.rax = -1;
+        return;
+    }
+    if (new_fd < 0 || new_fd >= MAX_FD)
+    {  // 범위 채크
+        f->R.rax = -1;
+        return;
+    }
+    // old_fd 유효성 체크
+    if (t->fds[old_fd] == NULL)
+    {
+        f->R.rax = -1;
+        return;
+    }
+
+    // 같은 파일 디스크립터면 그대로 반환
+    if (old_fd == new_fd)
+    {  // 이미 동일 하다면 아무 작업도 하지 않음
+        f->R.rax = new_fd;
+        return;
+    }
+
+    struct file *tag_fd = t->fds[new_fd];
+    // new 파일에 뭐가 있는지 확인
+    if (tag_fd != NULL)
+    {
+        // new 파일이 표준 입출력 인지 확인
+        if (tag_fd != STDIN_VAL && tag_fd != STDOUT_VAL)
+        {
+            // 표준 입축이 아니고 현재 다른 곳에서 쓰이는지 확인
+            bool is_shared = false;
+            for (int i = 0; i < MAX_FD; i++)
+            {
+                if (i != new_fd && t->fds[i] == tag_fd)
+                {
+                    is_shared = true;
+                    break;
+                }
+            }
+
+            // 표준 입축이 아니고 현재 다른 곳에서 안쓰이면 메모리 해제
+            if (!is_shared)
+            {
+                lock_acquire(&filesys_lock);
+                file_close(tag_fd);
+                lock_release(&filesys_lock);
+            }
+        }
+        // 표준 입출력 이거나 다른 곳에서 쓰는 거면 내 fds만 초기화
+        t->fds[new_fd] = NULL;
+    }
+    // 복사
+    t->fds[new_fd] = t->fds[old_fd];
+    // 성공 했으니 복사된거 반환
+    f->R.rax = new_fd;
 }
