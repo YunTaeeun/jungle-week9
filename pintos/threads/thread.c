@@ -250,7 +250,11 @@ thread_create (const char *name, int priority,thread_func *function, void *aux) 
 	// 현재 쓰레드에서 create 돼서 자식 쓰레드가 만들어지는거니까 부모 쓰레드는 현재 쓰레드
 	struct thread *parent = thread_current();		
 	// 부모 자식 리스트에, 자식 연결
-	list_push_back(&parent->child_list, &t->child_elem);
+	t->parent = parent;
+	if(parent != NULL) {
+		list_push_back(&parent->child_list, &t->child_elem); // 부모의 자식 리스트에 자식의 elem 넣어서 부모 자식 연결
+	}
+	
 
 	// 10주차 file 초기화
 	// 각 쓰레드마다 4KB 크기의 fd_table 을 가지고
@@ -264,7 +268,7 @@ thread_create (const char *name, int priority,thread_func *function, void *aux) 
 	t->fd_table[0] = (void *)1; // dummy
 	t->fd_table[1] = (void *)2; // dummy
 	// 10주차 rox
-	//t->running_file = NULL;
+	t->running_file = NULL;
 
 	/* Call the kernel_thread if it scheduled.
 	 * Note) rdi is 1st argument, and rsi is 2nd argument. */
@@ -570,8 +574,12 @@ init_thread (struct thread *t, const char *name, int priority) {
 	list_init(&t->holding_locks);
 	// 10주차 자식 관리 위한 초기화
 	sema_init(&t->wait_sema, 0);
+	sema_init(&t->exit_sema, 0);
 	list_init(&t->child_list);
-
+	// 10주차 wait, exit
+	t->parent = NULL;
+	t->waited = false;
+	t->exit_status = 0;
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should

@@ -13,6 +13,7 @@
 #include "filesys/file.h"
 #include "devices/input.h"
 #include "filesys/filesys.h"
+#include "lib/string.h"
 
 // 구현 핸들러
 // void halt (void) NO_RETURN;
@@ -201,10 +202,12 @@ void sys_exit(struct intr_frame *f)
 
 
 
-
 void sys_fork(struct intr_frame *f) 
 {
-  f->R.rax = -1;
+  const char *name = (const char *)f->R.rdi;
+  check_address(name);
+  
+  f->R.rax = process_fork(name, f);
 }
 
 
@@ -382,19 +385,21 @@ void sys_write(struct intr_frame *f)
 
 	check_buffer(buffer, size);							// 사용자가 넘겨준 buffer 주소를 읽어도 되는지 확인
 
+  struct thread *cur_thread = thread_current();
+  
   if(fd == 0) 
   {
     f->R.rax = -1;
     return;
   }
-  
-  struct thread *cur_thread = thread_current();
 
   if(fd < 0 || fd >= FDT_LIMIT || cur_thread->fd_table[fd] == NULL)
   {
     f->R.rax = -1;
     return;
   }
+
+
 
   if (fd == 1)
   {                          
@@ -412,6 +417,57 @@ void sys_write(struct intr_frame *f)
   f->R.rax = ret;
 }
 
-void sys_seek() {}
-void sys_tell() {}
-void sys_close() {}
+// 해당 fd의 파일 오프셋을 position 으로 이동
+void sys_seek(struct intr_frame *f) 
+{
+  int fd = f->R.rdi;
+  unsigned position = f->R.rsi;
+  
+  struct thread *cur_thread = thread_current();
+  if (fd < 2 || fd >= FDT_LIMIT || cur_thread->fd_table[fd] == NULL) {
+    return;
+  }
+  struct file *file = cur_thread->fd_table[fd];
+
+  lock_acquire(&filesys_lock);
+  file_seek(file, position);
+  lock_release(&filesys_lock);
+}
+
+// 해당 fd 파일의 오프셋을 반환
+void sys_tell(struct intr_frame *f) 
+{
+  int fd = f->R.rdi;
+
+  struct thread *cur_thread = thread_current();
+  if(fd < 2 || fd >= FDT_LIMIT || cur_thread->fd_table[fd]== NULL) {
+    f->R.rax = -1;
+    return;
+  }
+  struct file *file = cur_thread->fd_table[fd];
+
+  lock_acquire(&filesys_lock);
+  int ret = file_tell(file);
+  lock_release(&filesys_lock);
+
+  f->R.rax = ret;
+}
+
+void sys_close(struct intr_frame *f) 
+{
+  int fd = f->R.rdi;
+
+  struct thread *cur_thread = thread_current();
+
+  if(fd < 2 || fd >= FDT_LIMIT || cur_thread->fd_table[fd] == NULL) {
+    return;
+  }
+
+  struct file *file = cur_thread->fd_table[fd];
+
+  cur_thread->fd_table[fd] = NULL;
+
+  lock_acquire(&filesys_lock);
+  file_close(file);
+  lock_release(&filesys_lock);
+}

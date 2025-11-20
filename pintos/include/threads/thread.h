@@ -40,7 +40,7 @@ typedef int tid_t;
                                         /* 기본 우선순위. */
 #define PRI_MAX 63                      /* Highest priority. */
                                         /* 가장 높은 우선순위. */
-#define FDT_LIMIT 128
+#define FDT_LIMIT 512
 
 /* A kernel thread or user process.
  *
@@ -150,14 +150,16 @@ struct thread {
 	// 10주차 부모, 자식쓰레드 wait 
 	int exit_status; // 자식이 종료될때 상태 저장
 	struct semaphore wait_sema; // 자식이 종료될 떄 부모를 꺠우기 위한 개인 세마포어 
+	struct semaphore exit_sema; // 부모가 자식에게 종료 시그널을 줄 때 사용할 세마포어
 	struct list child_list; // 부모가 가질 자식들의 리스트
 	struct list_elem child_elem; // 자식이 부모의 리스트에 연결할때 쓸 elem
-	
+	bool waited;
+	struct thread *parent;
 	//10 주차 file
 	struct file **fd_table;
 	int next_fd;
 	// 10주차 rox
-	// struct file *running_file;
+	struct file *running_file;
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
 	// pml4는 스레드가 아니라, 해당 스레드(프로세스)가 사용하는 '가상 메모리 주소록' 그 자체를 가리키는 포인터
