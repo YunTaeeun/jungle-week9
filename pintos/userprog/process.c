@@ -46,6 +46,9 @@ static void process_init(void)
 	// fd table 초기화
 	fdt->files = palloc_get_multiple(
 	    PAL_ZERO, DIV_ROUND_UP(FD_INITIAL_CAPACITY * sizeof(struct file *), PGSIZE));
+	if (fdt->files == NULL)
+		PANIC("fd_table initialization failed.");
+
 	fdt->capacity = FD_INITIAL_CAPACITY;
 	fdt->next_fd = 3;
 	fdt->magic = FILE_FD_MAGIC;
@@ -148,6 +151,7 @@ tid_t process_fork(const char *name, struct intr_frame *if_ UNUSED)
 	sema_init(&args.child_create, 0);
 
 	/* 현재 스레드를 새 스레드로 복제합니다. */
+	/* 새 스레드가 시작될 때 __do_fork 함수가 실행되도록 지정합니다. */
 	tid_t child_tid = thread_create(name, PRI_DEFAULT, __do_fork, &args);
 	/* 스레드 생성에 실패하면 무의미한 대기를 하지 않고, 바로 TID_ERROR를
 	 * 반환한다 */
@@ -222,7 +226,10 @@ static bool duplicate_fdt(struct thread *parent, struct thread *child)
 	if (child_fdt->capacity < parent_fdt->capacity) {
 		int new_pages = DIV_ROUND_UP(parent_fdt->capacity * sizeof(struct file *), PGSIZE);
 		struct file **new = palloc_get_multiple(PAL_ZERO, new_pages);
-		memcpy(new, parent_fdt->files, parent_fdt->capacity * sizeof(struct file *));
+		// memcpy 제거: file_duplicate()에서 올바르게 복제될 것임
+
+		if (new == NULL)
+			return false;
 
 		// 기존 페이지 free
 		palloc_free_multiple(
@@ -293,10 +300,19 @@ static void __do_fork(void *aux)
 		goto error;
 #endif
 
-	process_init();
+	process_init(); // ← 여기서 child_fdt 생성
 	/* 3. 파일 디스크립터 테이블(FDT) 복사 */
-	if (!duplicate_fdt(parent, current))
-		goto error; // 복제 실패시 에러처리 후 자동 롤백
+	if (!duplicate_fdt(parent, current)) // ← 여기서 복제
+		goto error;		     // 복제 실패시 에러처리 후 자동 롤백
+
+	/* 4. 실행 파일 복사 (부모가 실행 중인 파일을 자식도 실행 중) */
+	if (parent->executable != NULL) {
+		lock_acquire(&filesys_lock);
+		current->executable = file_duplicate(parent->executable);
+		lock_release(&filesys_lock);
+		if (current->executable == NULL)
+			goto error;
+	}
 
 	/* 수행 성공을 저장 */
 	args->success = true;
@@ -337,7 +353,15 @@ int process_exec(void *f_name)
 	_if.cs = SEL_UCSEG;
 	_if.eflags = FLAG_IF | FLAG_MBS; // 인터럽트 활성화
 
-	/* 2. 현재 컨텍스트(메모리 공간, pml4)를 정리(파괴)하여
+	/* 2. 현재 실행 파일 닫기 (exec로 새 프로그램 실행 시) */
+	struct thread *curr = thread_current();
+	if (curr->executable != NULL) {
+		file_allow_write(curr->executable);
+		file_close(curr->executable);
+		curr->executable = NULL;
+	}
+
+	/* 3. 현재 컨텍스트(메모리 공간, pml4)를 정리(파괴)하여
 	 * 새 유저 프로세스로 '변신'할 준비를 함. */
 	process_cleanup(); // 코드, 데이터, 스택 영역 삭제
 
@@ -445,7 +469,10 @@ int process_wait(tid_t child_tid UNUSED)
 	sema_down(&child->dead);
 
 	int status = child->exit_status;
+
+	/* zombie 프로세스를 child_list에서 제거하고 메모리 해제 */
 	list_remove(&child->child_elem);
+	palloc_free_page(child);
 
 	return status;
 }
@@ -456,9 +483,16 @@ void process_exit(void)
 	struct thread *curr = thread_current();
 
 	/* 1. 파일 정리 */
+	/* 실행 파일 쓰기 허용 및 닫기 */
+	if (curr->executable != NULL) {
+		file_allow_write(curr->executable);
+		file_close(curr->executable);
+		curr->executable = NULL;
+	}
+
 	/* fd table 매직넘버 확인 */
-	if (curr->fdt->magic != FILE_FD_MAGIC)
-		return -1;
+	if (curr->fdt == NULL || curr->fdt->magic != FILE_FD_MAGIC)
+		goto skip_fdt_cleanup;
 
 	int cnt = 0; // 실제 사용 중인 슬롯수
 	for (int i = 3; i < curr->fdt->capacity; i++) {
@@ -473,6 +507,7 @@ void process_exit(void)
 	int pages = DIV_ROUND_UP(curr->fdt->capacity * sizeof(struct file *), PGSIZE);
 	palloc_free_multiple(curr->fdt->files, pages);
 
+skip_fdt_cleanup:
 	/* 2. 부모에게 알리기 */
 	/* 부모가 있는 경우 (fork로 생성된 프로세스) */
 	if (curr->parent != NULL && curr->parent->status != THREAD_DYING) {
@@ -691,6 +726,10 @@ static bool load(const char *file_name, struct intr_frame *if_)
 		goto done;
 	}
 
+	/* 실행 파일에 대한 쓰기 금지 */
+	file_deny_write(file);
+	t->executable = file;
+
 	/* 3️⃣ ELF 헤더 읽고 검증 */
 	// 실행 파일이 올바른 ELF 포맷인지 확인
 	if (file_read(file, &ehdr, sizeof ehdr) != sizeof ehdr ||
@@ -770,20 +809,27 @@ static bool load(const char *file_name, struct intr_frame *if_)
 	}
 
 	/* 5️⃣ 유저 스택 설정 */
-	if (!setup_stack(if_))
-
+	if (!setup_stack(if_)) {
+		printf("load: %s: setup_stack failed\n", program_name);
 		goto done;
+	}
 
 	/* 6️⃣ 실행 시작 주소 설정 */
 	if_->rip = ehdr.e_entry; // ELF 진입점 (main 함수 시작 주소)
 
 	success = arg_load_stack(file_name, if_);
+	if (!success) {
+		printf("load: %s: arg_load_stack failed\n", program_name);
+	}
 
 	// success = true;
 
 done:
-	/* 성공/실패 여부와 관계없이 파일 닫기 */
-	file_close(file);
+	/* 실패한 경우에만 파일 닫기 (성공 시에는 프로세스 종료 시까지 열어둠) */
+	if (!success && file != NULL) {
+		file_close(file);
+		t->executable = NULL; // 실패 시 executable 포인터 초기화
+	}
 	palloc_free_page(cmd);
 	return success;
 }

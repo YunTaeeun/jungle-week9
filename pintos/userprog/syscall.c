@@ -30,7 +30,12 @@ int wait(pid_t child_tid);
 bool create(const char *file, unsigned initial_size);
 bool remove(const char *file);
 int open(const char *file);
+int filesize(int fd);
 void close(int fd);
+int read(int fd, void *buffer, unsigned length);
+int write(int fd, const void *buffer, unsigned length);
+void seek(int fd, unsigned position);
+unsigned tell(int fd);
 
 static struct intr_frame *current_syscall_frame;
 struct lock filesys_lock;
@@ -107,19 +112,19 @@ void syscall_handler(struct intr_frame *f UNUSED)
 		f->R.rax = open((const char *)arg1);
 		break;
 	case SYS_FILESIZE:
-		// filesize(0);
+		f->R.rax = filesize((int)arg1);
 		break;
 	case SYS_READ:
-		// read 구현
+		f->R.rax = read((int)arg1, (void *)arg2, (unsigned)arg3);
 		break;
 	case SYS_WRITE:
 		f->R.rax = write((int)arg1, (const void *)arg2, (unsigned)arg3);
 		break;
 	case SYS_SEEK:
-		// seek 구현
+		seek((int)arg1, (unsigned)arg2);
 		break;
 	case SYS_TELL:
-		// tell 구현
+		f->R.rax = tell((int)arg1);
 		break;
 	case SYS_CLOSE:
 		close((int)arg1);
@@ -129,6 +134,92 @@ void syscall_handler(struct intr_frame *f UNUSED)
 		break;
 	}
 	// printf("system call!\n");
+}
+
+// Returns the position of the next byte to be read or written in open file fd,
+// expressed in bytes from the beginning of the file.
+unsigned tell(int fd)
+{
+	// 1. fd 검증
+	if (fd < 3) // 유효하지 않은 fd (쓰기 전용)
+		return 0;
+
+	// 2. 파일 객체 가져오기
+	struct file *f = thread_current()->fdt->files[fd];
+	if (f == NULL)
+		return -1;
+
+	// 3. 구현되어 있는 함수 호출
+	return (file_tell(f));
+}
+
+/**
+ * 열린 파일 fd에 대해 다음에 읽거나 쓸 바이트의 위치를 position으로 변경합니다.
+ * 이때 position은 파일의 시작부터 바이트 단위로 계산된 값입니다.
+ */
+// TODO: 프로젝트 2에선 테스트가 경쟁을 안 보기 때문에 굳이 lock을 안 걸어도 됩니다.
+//  하지만 원칙상으론 필요하므로 나중엔 inode RW-lock을 씌워야 한다
+void seek(int fd, unsigned position)
+{
+	// 1. fd 검증
+	if (fd <= 2) // 유효하지 않은 fd (쓰기 전용), 음수 방어
+		return;
+
+	// 2. 파일 객체 가져오기
+	struct file *f = thread_current()->fdt->files[fd];
+	if (f == NULL)
+		return;
+
+	// 3. 구현되어 있는 함수 호출
+	file_seek(f, position);
+}
+
+/**
+ * fd로 열린 파일에서 size만큼 데이터를 읽어서 buffer에 저장합니다.
+ * 실제로 읽은 바이트 수를 반환합니다. 파일의 끝까지 읽으면 0을 반환합니다.
+ * 읽는 도중 문제가 생겨서 읽을 수 없으면 -1을 반환합니다. (단순히 파일 끝에 도달한 경우는 아님)
+ * fd가 0이면 키보드 입력을 받아서 input_getc()를 사용해 데이터를 읽습니다.
+ */
+int read(int fd, void *buffer, unsigned length)
+{
+	// 1. fd 검증
+	if (fd == 1 || fd == 2) // 유효하지 않은 fd (쓰기 전용)
+		return -1;
+
+	struct fd_table *fdt = thread_current()->fdt;
+	if (fd >= fdt->capacity || fd < 0) // fd는 슬롯보다 크거나 음수일 수 없음
+		return -1;
+	if (fdt->files[fd] == NULL) // 빈 슬롯
+		return -1;
+
+	// 2. 버퍼 유저메모리인지 검증 (read/write는 페이지 할당 여부 체크 안함)
+	if (buffer == NULL || !is_user_vaddr(buffer) || !is_valid_buffer(buffer, length)) {
+		exit(-1);
+	}
+
+	// 3. fd = 0 처리
+	if (fd == 0) // 키보드 입력
+	{
+		int count;
+		for (count = 0; count < length; count++) {
+			((char *)buffer)[count] = input_getc(); // FIXME: 추후 다시 공부
+		}
+		return count;
+	}
+
+	// 3. fd > 2 (유효한 파일인 경우)
+	if (fd > 2) {
+		lock_acquire(&filesys_lock);
+		unsigned ready_bytes = file_read(fdt->files[fd], buffer, length);
+		lock_release(&filesys_lock);
+		// 바이트 체크
+		if (ready_bytes == 0)
+			return 0;
+		else
+			return ready_bytes; // 파일 중간까지 읽음
+	}
+
+	return -1; // 에러는 -1 리턴
 }
 
 /*
@@ -172,7 +263,7 @@ int open(const char *file)
 	// 2. syscall.함수에 초기화 함수 정의
 	// 3. thread 구조체에 struct fd_table *fdt; 멤버 추가 및 init_thread()에서 NULL로 초기화
 	// 4. process_exit()에서 남은 fd 모두 file_close - free(td_table)
-	// 5. fork시 부모테이블 복사 > 각 file 객체 recnt++ (?).. 일단 보류.
+	// 5. fork
 
 	// [1] open함수
 	// 0. 널포인터 검증 후 exit(-1)
@@ -338,30 +429,38 @@ void exit(int status)
 
 int write(int fd, const void *buffer, unsigned length)
 {
-	// 1. 버퍼 주소 검증
-	if (!is_valid_buffer(buffer, length)) {
+	// [검증1] 버퍼 주소 검증 (read/write는 페이지 할당 여부 체크 안함)
+	if (buffer == NULL || !is_user_vaddr(buffer) || !is_valid_buffer(buffer, length)) {
 		exit(-1);
 	}
 
-	// 2. fd에 따라 분기.
-	// fd = 1: console출력. 2= 표준 입력. invalid. write
-	if (fd == STDOUT_FILENO) // fd == 1 : console 출력
-	{
+	// [검증2] fd 검증 : 입력 스트림에 쓰기 불가
+	if (fd == STDIN_FILENO)
+		return -1;
+
+	// [검증2] fd 검증 : 콘솔 출력
+	if (fd == STDOUT_FILENO) {
 		putbuf((const char *)buffer, length);
 		return length;
-	} else if (fd == STDIN_FILENO) // fd == 0 : 표준 입력
-	{
-		// 입력이니까 쓸 수 없음
-		return -1;
-	} else if (fd < 0 || fd >= 128) // 유효하지 않은 fd 범위일 경우
-	{
-		return -1;
-	} else {
-		// 파일 write
-		// TODO: 파일 디스크립터 테이블에서 file 가져온다
-		// TODO: file_write()
-		return -1;
 	}
+
+	// fd >= 2 : 파일 쓰기
+	struct fd_table *fdt = thread_current()->fdt;
+	// fd 범위 검증
+	if (fd < 0 || fd >= fdt->capacity)
+		return -1;
+
+	// 파일이 열려있는지 확인
+	if (fdt->files[fd] == NULL)
+		return -1;
+
+	// 실제 파일에 쓰기
+	lock_acquire(&filesys_lock);
+	off_t written = file_write(fdt->files[fd], buffer, length);
+	lock_release(&filesys_lock);
+
+	// 실제 사용한 바이트 수 변환
+	return written;
 }
 
 bool is_valid_user_memory(void *ptr)
@@ -426,6 +525,21 @@ static char *copy_string_from_user_to_kernel(const char *user_str)
 
 int filesize(int fd)
 {
+	// fd 범위 검증
+	struct fd_table *fdt = thread_current()->fdt;
+	if (fd < 0 || fd >= fdt->capacity)
+		return -1;
+
+	// 파일이 열려있는지 확인
+	if (fdt->files[fd] == NULL)
+		return -1;
+
+	// 파일 크기 반환
+	lock_acquire(&filesys_lock);
+	off_t size = file_length(fdt->files[fd]);
+	lock_release(&filesys_lock);
+
+	return size;
 }
 
 pid_t fork(const char *thread_name)

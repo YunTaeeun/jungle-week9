@@ -71,28 +71,7 @@ typedef int tid_t;
  *           |               name              |
  *           |              status             |
  *      0 kB +---------------------------------+
- *
- * The upshot of this is twofold:
- *
- *    1. First, `struct thread' must not be allowed to grow too
- *       big.  If it does, then there will not be enough room for
- *       the kernel stack.  Our base `struct thread' is only a
- *       few bytes in size.  It probably should stay well under 1
- *       kB.
- *
- *    2. Second, kernel stacks must not be allowed to grow too
- *       large.  If a stack overflows, it will corrupt the thread
- *       state.  Thus, kernel functions should not allocate large
- *       structures or arrays as non-static local variables.  Use
- *       dynamic allocation with malloc() or palloc_get_page()
- *       instead.
- *
- * The first symptom of either of these problems will probably be
- * an assertion failure in thread_current(), which checks that
- * the `magic' member of the running thread's `struct thread' is
- * set to THREAD_MAGIC.  Stack overflow will normally change this
- * value, triggering the assertion. */
-/* 커널 스레드 또는 사용자 프로세스입니다.
+ * 커널 스레드 또는 사용자 프로세스입니다.
  *
  * 각 스레드 구조체는 고유한 4 kB 페이지에 저장됩니다.
  * 스레드 구조체 자체는 페이지의 맨 아래(오프셋 0)에 위치하고,
@@ -127,13 +106,9 @@ typedef int tid_t;
  * 준비(ready) 상태의 스레드만 실행 큐에 있고,
  * 블록(blocked) 상태의 스레드만 세마포어 대기 리스트에 있기 때문입니다. */
 struct thread {
-	/* Owned by thread.c. */
-	tid_t tid;		   /* Thread identifier. */
-				   /* 스레드 식별자. */
-	enum thread_status status; /* Thread state. */
-				   /* 스레드 상태. */
-	char name[16];		   /* Name (for debugging purposes). */
-				   /* 디버깅을 위한 스레드 이름. */
+	tid_t tid;		   /* 스레드 식별자. */
+	enum thread_status status; /* 스레드 상태. */
+	char name[16];		   /* 디버깅을 위한 스레드 이름. */
 	int priority;		   /* Priority.  현재 우선순위 */
 	int original_priority;	   // 처음 부여 받는 우선순위
 	struct list holding_locks; // 내가 보유한 락 리스트
@@ -147,6 +122,7 @@ struct thread {
 	int exit_status; // 종료 상태
 	struct thread *parent;
 	struct fd_table *fdt;
+	struct file *executable; // 실행 중인 프로세스의 실행 파일 (쓰기 금지용)
 
 	int nice;	// Nice 값 (-20 ~ 20)
 	int recent_cpu; // 최근 CPU 사용량 (고정소수점) (17.14)
@@ -155,7 +131,7 @@ struct thread {
 	struct list_elem elem; /* List element. */
 	/* 리스트 원소(실행 큐 혹은 대기 큐에서 사용). */
 	int64_t wakeup_tick; /* Wakeup tick. */
-			     /* 깨어날 시각(틱). */
+	/* 깨어날 시각(틱). */
 
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
