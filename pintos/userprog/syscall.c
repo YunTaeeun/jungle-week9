@@ -54,8 +54,6 @@ static void sys_write(struct intr_frame *f);
 static void sys_seek(struct intr_frame *f);
 static void sys_tell(struct intr_frame *f);
 static void sys_close(struct intr_frame *f);
-
-/* Optional extra credit stubs. */
 static void sys_dup2(struct intr_frame *f);
 
 void syscall_init(void)

@@ -38,7 +38,7 @@ static void process_init(void) {}
 
 struct initd_args
 {
-    char* fn_copy;
+    const char* fn_copy;
     struct child_info* info;
 };
 
@@ -50,15 +50,7 @@ struct initd_args
 // filename 은 'programname args ~' 이런식
 tid_t process_create_initd(const char* file_name)
 {
-    char* fn_copy;
     tid_t tid;
-
-    /* Make a copy of FILE_NAME.
-     * Otherwise there's a race between the caller and load(). */
-    fn_copy = palloc_get_page(0);
-    if (fn_copy == NULL) return TID_ERROR;
-    // fn_copy = 'programname args ~'
-    strlcpy(fn_copy, file_name, PGSIZE);
 
     /* Create a new thread to execute FILE_NAME. */
     /* FILE_NAME을 실행할 새 스레드를 생성합니다. */
@@ -70,7 +62,6 @@ tid_t process_create_initd(const char* file_name)
     struct child_info* info = malloc(sizeof(struct child_info));
     if (info == NULL)
     {
-        palloc_free_page(fn_copy);
         return TID_ERROR;
     }
     info->tid = TID_ERROR;
@@ -86,10 +77,9 @@ tid_t process_create_initd(const char* file_name)
         // 실패 시 정리 로직 필요 (생략 가능하지만 안전을 위해)
         list_remove(&info->elem);
         free(info);
-        palloc_free_page(fn_copy);
         return TID_ERROR;
     }
-    args->fn_copy = fn_copy;
+    args->fn_copy = file_name;
     args->info = info;
 
     /* Create a new thread to execute FILE_NAME. */
@@ -98,7 +88,6 @@ tid_t process_create_initd(const char* file_name)
     tid = thread_create(thread_name, PRI_DEFAULT, initd, args);
     if (tid == TID_ERROR)
     {
-        palloc_free_page(fn_copy);
         free(args);
         list_remove(&info->elem);
         free(info);
@@ -112,9 +101,9 @@ tid_t process_create_initd(const char* file_name)
 static void initd(void* aux)
 {
     struct initd_args* args = (struct initd_args*)aux;
-    char* f_name = args->fn_copy;
+    const char* f_name = args->fn_copy;
 
-    /* [수정됨] 자식이 자신의 명찰(info)을 챙김 */
+    /* 자식이 자신의 명찰(info)을 챙김 */
     thread_current()->my_info = args->info;
 
     /* 사용한 인자 구조체 해제 */
@@ -124,7 +113,7 @@ static void initd(void* aux)
 #endif
 
     process_init();                       // 프로세스 초기화
-    if (process_exec(f_name) < 0)         // 프로세스 실행 시도, 실패 시
+    if (process_exec((void*)f_name) < 0)  // 프로세스 실행 시도, 실패 시
         PANIC("Fail to launch initd\n");  // 패닉 발생
     NOT_REACHED();                        // 이 지점에 도달하면 안 됨
 }
