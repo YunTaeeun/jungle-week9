@@ -30,10 +30,10 @@ static bool load(const char *file_name, struct intr_frame *if_);
 static void initd(void *f_name);
 static bool duplicate_fdt(struct thread *parent, struct thread *child);
 static void __do_fork(void *);
-struct thread *find_child(tid_t);
+struct child_info *find_child(tid_t); // [수정] 반환 타입 변경
 
 /* initd와 다른 프로세스들을 위한 일반 프로세스 초기화 함수입니다. */
-static void process_init(void)
+static bool process_init(void)
 {
 	struct thread *current = thread_current();
 	struct fd_table *fdt = current->fdt;
@@ -41,19 +41,24 @@ static void process_init(void)
 	// fd table 동적 할당
 	fdt = palloc_get_page(0);
 	if (fdt == NULL)
-		PANIC("fd_table allocation failed");
+		// PANIC("fd_table allocation failed");
+		return false;
 
 	// fd table 초기화
 	fdt->files = palloc_get_multiple(
 	    PAL_ZERO, DIV_ROUND_UP(FD_INITIAL_CAPACITY * sizeof(struct file *), PGSIZE));
-	if (fdt->files == NULL)
-		PANIC("fd_table initialization failed.");
+	if (fdt->files == NULL) {
+		palloc_free_page(fdt); // 할당했던 페이지 해제
+		return false;
+	}
+	// PANIC("fd_table initialization failed.");
 
 	fdt->capacity = FD_INITIAL_CAPACITY;
 	fdt->next_fd = 3;
 	fdt->magic = FILE_FD_MAGIC;
 
 	current->fdt = fdt;
+	return true;
 }
 
 /* Starts the first userland program, called "initd", loaded from FILE_NAME.
@@ -108,7 +113,9 @@ static void initd(void *f_name)
 	supplemental_page_table_init(&thread_current()->spt);
 #endif
 	// 최초 유저 프로세스 초기화
-	process_init();
+	if (!process_init()) {
+		PANIC("Fail to init process_init");
+	}
 
 	// 프로그램명만 추출하여 "Executing" 메시지 출력
 	// AS-IS: exec 시스템콜로 실행되는 자식 프로세스에서도 Executing 메시지
@@ -139,6 +146,7 @@ struct fork_args {
 	struct thread *parent;
 	struct intr_frame *parent_if;
 	struct semaphore child_create;
+	struct child_info *child_info; // [추가] 자식 정보 구조체 전달용
 	bool success;
 };
 
@@ -150,20 +158,37 @@ tid_t process_fork(const char *name, struct intr_frame *if_ UNUSED)
 	struct fork_args args = {.parent = thread_current(), .parent_if = if_, .success = false};
 	sema_init(&args.child_create, 0);
 
+	/* [추가] child_info 할당 및 초기화 */
+	struct child_info *info = malloc(sizeof(struct child_info));
+	if (info == NULL)
+		return TID_ERROR;
+
+	info->tid = TID_ERROR; // 스레드 생성 후 업데이트
+	info->exit_status = 0;
+	sema_init(&info->wait_sema, 0);
+	list_push_back(&thread_current()->child_list, &info->elem);
+
+	args.child_info = info; // 자식에게 전달
+
 	/* 현재 스레드를 새 스레드로 복제합니다. */
 	/* 새 스레드가 시작될 때 __do_fork 함수가 실행되도록 지정합니다. */
 	tid_t child_tid = thread_create(name, PRI_DEFAULT, __do_fork, &args);
 	/* 스레드 생성에 실패하면 무의미한 대기를 하지 않고, 바로 TID_ERROR를
 	 * 반환한다 */
 	if (child_tid == TID_ERROR) {
+		list_remove(&info->elem); // 리스트에서 제거
+		free(info);		  // 메모리 해제
 		return TID_ERROR;
 	}
+	info->tid = child_tid; // 생성된 TID 저장
 
 	/* 자식 프로세스 생성과 복제가 완료될 때까지 부모 프로세스는 기다린다 */
 	sema_down(&args.child_create);
 
 	/* 복제 성공 여부를 판단한다 */
 	if (!args.success) {
+		list_remove(&info->elem); // 실패했으므로 리스트에서 제거
+		free(info);		  // 메모리 해제
 		return TID_ERROR;
 	}
 
@@ -281,6 +306,9 @@ static void __do_fork(void *aux)
 	struct intr_frame *parent_if = args->parent_if;
 	bool succ = true;
 
+	/* [추가] 자식 프로세스의 running_info 설정 */
+	current->running_info = args->child_info;
+
 	/* 1. CPU 컨텍스트를 로컬 스택으로 읽어옵니다. */
 	memcpy(&if_, parent_if, sizeof(struct intr_frame));
 	if_.R.rax = 0; // 자식 프로세스의 입장에서 fork()의 반환값을 0으로 설정
@@ -300,7 +328,11 @@ static void __do_fork(void *aux)
 		goto error;
 #endif
 
-	process_init(); // ← 여기서 child_fdt 생성
+	/* FDT 생성 실패 시 에러 처리 */
+	if (!process_init())
+		goto error;
+	// process_init(); // ← 여기서 child_fdt 생성
+
 	/* 3. 파일 디스크립터 테이블(FDT) 복사 */
 	if (!duplicate_fdt(parent, current)) // ← 여기서 복제
 		goto error;		     // 복제 실패시 에러처리 후 자동 롤백
@@ -317,20 +349,18 @@ static void __do_fork(void *aux)
 	/* 수행 성공을 저장 */
 	args->success = true;
 
-	/* 부모 - 자식 관계 설정 (wait때 사용) */
-	current->parent = parent;
-	list_push_back(&parent->child_list, &current->child_elem);
-
 	/* 부모 프로세스에게 종료를 알린다 */
 	sema_up(&args->child_create);
 
-	/* 마지막으로, 새로 생성된 프로세스로 전환합니다. */
+	/* 새로 생성된 프로세스로 전환합니다. */
 	if (succ)
 		do_iret(&if_);
 
 error:
 	/* 수행 실패를 저장하고 부모 프로세스에게 종료를 알린다. */
 	args->success = false; // 명시적으로 보여주기 위해 써줌
+	current->running_info = (struct child_info *)0xDEADBEEF;
+
 	sema_up(&args->child_create);
 
 	thread_exit();
@@ -388,15 +418,17 @@ int process_exec(void *f_name)
 	NOT_REACHED();
 }
 
-struct thread *find_child(tid_t target_tid)
+/* 자식 리스트에서 tid에 해당하는 child_info를 찾아 반환합니다. */
+struct child_info *find_child(tid_t target_tid)
 {
+	struct thread *curr = thread_current();
 	struct list_elem *e;
-	struct thread *child = NULL;
-	for (e = list_begin(&thread_current()->child_list);
-	     e != list_end(&thread_current()->child_list); e = list_next(e)) {
-		child = list_entry(e, struct thread, child_elem);
-		if (child->tid == target_tid) {
-			return child;
+
+	for (e = list_begin(&curr->child_list); e != list_end(&curr->child_list);
+	     e = list_next(e)) {
+		struct child_info *info = list_entry(e, struct child_info, elem);
+		if (info->tid == target_tid) {
+			return info;
 		}
 	}
 
@@ -419,60 +451,21 @@ void process_wait_initd(void)
  * 기다리지 않고 즉시 -1을 반환합니다.*/
 int process_wait(tid_t child_tid UNUSED)
 {
-	// [1] 세팅: thread 구조체
-	// 1. thread 구조체에 struct semaphore dead 추가
-	// 2. thread 구조체에 list_elem 추가
-	// 3. thread 구조체에 bool waited 추가 (wait은 1번만 가능)
-	// 4. thread 구조체에 parent 추가
-	// 5. 스레드 생길 때 child_list 선언 및 초기화 (부모-자식 확인용) :
-	// init_thread()
-	// 5. 스레드 생길 때 sema_init(&child->dead, 0) : init_thread()
-	// 6. fork시 parent 값 세팅 : __do_fork()
+	/* 자식 리스트에서 해당 TID의 info 찾기 */
+	struct child_info *child_info = find_child(child_tid);
 
-	// [2] 자식 스레드의 작업
-	// 1. 자식 스레드는 자기 작업이 다 끝나면 exit_status 값 세팅
-	// : exit syscall에서 세팅
-	// 2. (조건문) 부모 스레드가 NULL 이거나 죽은 스레드인지 확인 (고아
-	// 확인 - TC: wait-killed) : process_exit()
-	// 3. (조건문) 2번이 false이면 세마포어 업 (부모 깨우기)
-	// 4. 자기 자신 thread_exit() (스케쥴러로 넘어가서 이 스레드 다시
-	// 실행되지 않음)
-
-	// [3] 부모 스레드의 작업
-	// 1. find_child(): child_list에서 해당 tid가 자기 자식 맞는지 확인:
-	// 없으면 -1 반환
-	// 2. 유효한 TID인지: 아니면 -1 반환
-	// 3. 인터럽트 끄기 & child->waited = false인지 확인: 아니면 -1 반환 &
-	// 인터럽트 원래 상태로 복원
-	// 4. 1~3 통과했으면 child->waited = true로 세팅 & 인터럽트 원래 상태로
-	// 복원
-	// 5. sema_down 하고 자식이 up할 까지 기다림
-	// 6. up됐으면 exit_status 값을 지역 변수 status에 기록
-	// 7. list_remove
-	// 8. return status
-	struct thread *child = find_child(child_tid);
-	if (!child) // 못 찾았거나 유효하지 않은 TID
-	{
+	if (child_info == NULL) // 못 찾았거나 유효하지 않은 TID
 		return -1;
-	}
 
-	enum intr_level old_level;
-	ASSERT(!intr_context());
-	old_level = intr_disable();
-	if (child->waited) {
-		intr_set_level(old_level);
-		return -1;
-	}
-	child->waited = true;
-	intr_set_level(old_level);
+	/* 자식 프로세스가 종료될 때까지 대기 */
+	sema_down(&child_info->wait_sema);
 
-	sema_down(&child->dead);
+	/* 종료 상태 가져오기 */
+	int status = child_info->exit_status;
 
-	int status = child->exit_status;
-
-	/* zombie 프로세스를 child_list에서 제거하고 메모리 해제 */
-	list_remove(&child->child_elem);
-	palloc_free_page(child);
+	/* 리스트에서 제거 및 메모리 해제 */
+	list_remove(&child_info->elem);
+	free(child_info);
 
 	return status;
 }
@@ -481,6 +474,11 @@ int process_wait(tid_t child_tid UNUSED)
 void process_exit(void)
 {
 	struct thread *curr = thread_current();
+
+	/* Threads 테스트들은 여기서 바로 리턴되어야 패닉이 발생하지 않음 */
+	if (curr->fdt == NULL) {
+		return;
+	}
 
 	/* 1. 파일 정리 */
 	/* 실행 파일 쓰기 허용 및 닫기 */
@@ -506,15 +504,25 @@ void process_exit(void)
 	/* 동적할당 받았던 연속된 페이지 전체를 한꺼번에 해제한다 */
 	int pages = DIV_ROUND_UP(curr->fdt->capacity * sizeof(struct file *), PGSIZE);
 	palloc_free_multiple(curr->fdt->files, pages);
+	/* FDT 페이지 자체도 해제 */
+	palloc_free_page(curr->fdt);
 
 skip_fdt_cleanup:
 	/* 2. 부모에게 알리기 */
-	/* 부모가 있는 경우 (fork로 생성된 프로세스) */
-	if (curr->parent != NULL && curr->parent->status != THREAD_DYING) {
-		sema_up(&curr->dead);
-	}
-	/* 부모가 없는 경우 (최초 프로세스 - initd로 생성) */
-	else if (curr->parent == NULL) {
+	if (curr->running_info == (struct child_info *)0xDEADBEEF) {
+		/* [추가] fork 실패로 인해 정리되는 자식 프로세스
+		   - 부모가 이미 실패를 인지하고 메모리를 해제했으므로 running_info 접근 금지
+		   - initd가 아니므로 initial 세마포어 시그널 금지
+		   - 아무것도 하지 않고 조용히 죽는다. */
+	} else if (curr->running_info != NULL) {
+		/* [수정] curr->exit_status가 없으므로 복사하지 않습니다.
+	       대신 syscall exit()이나 exception handler에서
+	       running_info->exit_status에 값을 미리 설정해야 합니다. */
+
+		// printf("%s: exit(%d)\n", curr->name, curr->running_info->exit_status);
+		sema_up(&curr->running_info->wait_sema);
+	} else {
+		/* running_info가 없는 경우 (예: 최초 프로세스 initd) */
 		sema_up(&initial);
 	}
 

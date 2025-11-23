@@ -258,13 +258,6 @@ void close(int fd)
  */
 int open(const char *file)
 {
-	// [0] 세팅
-	// 1. struct fd_table 정의와 초기슬롯수, 매직넘버 디파인
-	// 2. syscall.함수에 초기화 함수 정의
-	// 3. thread 구조체에 struct fd_table *fdt; 멤버 추가 및 init_thread()에서 NULL로 초기화
-	// 4. process_exit()에서 남은 fd 모두 file_close - free(td_table)
-	// 5. fork
-
 	// [1] open함수
 	// 0. 널포인터 검증 후 exit(-1)
 	if (file == NULL)
@@ -275,9 +268,12 @@ int open(const char *file)
 		exit(-1);
 
 	// 2. 유저메모리에 있던 파일명을 커널메모리로 복사 (동적할당)
-	const char *kernel_file = copy_string_from_user_to_kernel(file);
-	if (kernel_file == NULL || (strlen(kernel_file) == 0) ||
-	    (strlen(kernel_file) > FILE_NAME_MAX)) {
+	char *kernel_file = copy_string_from_user_to_kernel(file); // const 제거 (free 위해)
+	if (kernel_file == NULL)
+		return -1;
+
+	// 파일명 길이 체크 등 추가 검증
+	if (strlen(kernel_file) == 0 || strlen(kernel_file) > FILE_NAME_MAX) {
 		palloc_free_page(kernel_file);
 		return -1;
 	}
@@ -286,8 +282,10 @@ int open(const char *file)
 	lock_acquire(&filesys_lock);
 	struct file *opened_file = filesys_open(kernel_file);
 	lock_release(&filesys_lock);
-	if (opened_file == NULL)
+	if (opened_file == NULL) {
+		palloc_free_page(kernel_file);
 		return -1;
+	}
 
 	// 4. capacity 확인
 
@@ -298,6 +296,13 @@ int open(const char *file)
 		// 실패시 file_close 로 롤백하고 return -1;
 		int new_pages = DIV_ROUND_UP(fdt->capacity * 2 * sizeof(struct file *), PGSIZE);
 		struct file **new = palloc_get_multiple(PAL_ZERO, new_pages);
+		/* [수정] 메모리 할당 실패(OOM) 체크 */
+		if (new == NULL) {
+			file_close(opened_file);
+			palloc_free_page(kernel_file);
+			return -1;
+		}
+
 		memcpy(new, fdt->files, fdt->capacity * sizeof(struct file *));
 
 		// 기존 페이지 free
@@ -399,7 +404,7 @@ int exec(const char *file)
 	const char *kernel_file = copy_string_from_user_to_kernel(file);
 	if (kernel_file == NULL || (strlen(kernel_file) == 0)) {
 		palloc_free_page(kernel_file);
-		return false;
+		return -1;
 	}
 
 	int result = process_exec(kernel_file);
@@ -420,10 +425,14 @@ void halt(void)
 void exit(int status)
 {
 	struct thread *curr = thread_current();
-	curr->exit_status = status; // 종료 상태 저장 (wait에서 사용)
+	/* [수정] running_info가 유효한지 확인 (NULL 체크 및 Sentinel 값 체크) */
+	if (curr->running_info && curr->running_info != (struct child_info *)0xDEADBEEF) {
+		curr->running_info->exit_status = status;
+	}
 
 	// 스레드 종료
-	printf("%s: exit(%d)\n", curr->name, curr->exit_status);
+	/* [수정] running_info가 NULL일 경우(예: initd) 안전하게 status 출력 */
+	printf("%s: exit(%d)\n", curr->name, status);
 	thread_exit();
 }
 

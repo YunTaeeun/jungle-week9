@@ -92,19 +92,17 @@ typedef int tid_t;
  * 이러한 문제의 첫 번째 증상은 thread_current()의 assertion 실패일 수 있습니다.
  * thread_current()는 실행 중인 스레드의 `magic` 멤버가 THREAD_MAGIC인지
  * 확인하는데, 스택 오버플로우는 이 값을 변경하여 assertion을 유발하기
- * 때문입니다. */
-/* The `elem' member has a dual purpose.  It can be an element in
- * the run queue (thread.c), or it can be an element in a
- * semaphore wait list (synch.c).  It can be used these two ways
- * only because they are mutually exclusive: only a thread in the
- * ready state is on the run queue, whereas only a thread in the
- * blocked state is on a semaphore wait list. */
-/* `elem` 멤버는 두 가지 목적으로 사용됩니다.
+ * 때문입니다.
+ * `elem` 멤버는 두 가지 목적으로 사용됩니다.
  * 실행 큐(thread.c)의 원소로 쓰일 수도 있고,
  * 세마포어 대기 리스트(synch.c)의 원소로 쓰일 수도 있습니다.
  * 두 상태가 상호 배타적이기 때문에 이런 이중 용도가 가능합니다.
  * 준비(ready) 상태의 스레드만 실행 큐에 있고,
  * 블록(blocked) 상태의 스레드만 세마포어 대기 리스트에 있기 때문입니다. */
+
+/* 전방 선언 */
+struct child_info;
+
 struct thread {
 	tid_t tid;		   /* 스레드 식별자. */
 	enum thread_status status; /* 스레드 상태. */
@@ -115,12 +113,15 @@ struct thread {
 	struct lock *waiting_lock; // 내가 기다리는 락
 
 	/* system call에서 사용 */
-	struct semaphore dead; // wait/exit용. 자식 죽을 때까지 부모 기다리는 용도.
-	struct list child_list;
-	struct list_elem child_elem;
-	bool waited;
-	int exit_status; // 종료 상태
-	struct thread *parent;
+	/* [삭제] struct semaphore dead; */	  // -> child_info로 이동
+	/* [삭제] struct list_elem child_elem; */ // -> child_info로 이동
+	/* [삭제] int exit_status; */		  // -> child_info로 이동
+	/* [삭제] struct thread *parent; */ // 더 이상 필요 없음 (child_info가 연결고리)
+	/* [삭제] bool waited; */	    // 필요하다면 child_info나 로직으로 처리
+
+	/* [변경] 자식 프로세스 관리 */
+	struct list child_list;		 /* 자식들의 child_info 구조체 리스트 */
+	struct child_info *running_info; /* 현재 스레드(자식) 자신의 child_info 포인터 */
 	struct fd_table *fdt;
 	struct file *executable; // 실행 중인 프로세스의 실행 파일 (쓰기 금지용)
 
@@ -131,7 +132,7 @@ struct thread {
 	struct list_elem elem; /* List element. */
 	/* 리스트 원소(실행 큐 혹은 대기 큐에서 사용). */
 	int64_t wakeup_tick; /* Wakeup tick. */
-	/* 깨어날 시각(틱). */
+			     /* 깨어날 시각(틱). */
 
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
@@ -189,5 +190,7 @@ int thread_get_recent_cpu(void);
 int thread_get_load_avg(void);
 
 void do_iret(struct intr_frame *tf);
+
+void thread_test_preemption(void); // 함수 프로토타입 추가
 
 #endif /* threads/thread.h */

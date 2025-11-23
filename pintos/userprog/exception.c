@@ -6,6 +6,7 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "intrinsic.h"
+#include "userprog/process.h" // [추가] struct child_info 정의를 위해 필요
 
 // exception.c: 사용자 프로세스가 권한 밖 작업을 수행해서 발생하는 예외 처리
 
@@ -93,6 +94,12 @@ static void kill(struct intr_frame *f)
 		   커널을 패닉시킵니다. */
 		printf("Interrupt %#04llx (%s) in unknown segment %04x\n", f->vec_no,
 		       intr_name(f->vec_no), f->cs);
+
+		/* [추가] 강제 종료 시 exit status 설정 (-1) */
+		struct thread *curr = thread_current();
+		if (curr->running_info) {
+			curr->running_info->exit_status = -1;
+		}
 		thread_exit();
 	}
 }
