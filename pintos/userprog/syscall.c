@@ -24,7 +24,7 @@ static char *copy_string_from_user_to_kernel(const char *ustr);
 /* 시스템콜 함수 선언 */
 void halt(void);
 void exit(int status);
-pid_t fork(const char *thread_name);
+pid_t fork(const char *thread_name, struct intr_frame *f);
 int exec(const char *file);
 int wait(pid_t child_tid);
 bool create(const char *file, unsigned initial_size);
@@ -37,7 +37,7 @@ int write(int fd, const void *buffer, unsigned length);
 void seek(int fd, unsigned position);
 unsigned tell(int fd);
 
-static struct intr_frame *current_syscall_frame;
+// static struct intr_frame *current_syscall_frame;
 struct lock filesys_lock;
 
 #define FILE_NAME_MAX 14 /* filesys.c의 NAME_MAX와 동일 */
@@ -90,8 +90,8 @@ void syscall_handler(struct intr_frame *f UNUSED)
 		exit((int)arg1);
 		break;
 	case SYS_FORK:
-		current_syscall_frame = f; // 현재 프로세스의 CPU 레지스터 상태
-		pid_t pid = fork((const char *)arg1);
+		//	current_syscall_frame = f; // 현재 프로세스의 CPU 레지스터 상태
+		pid_t pid = fork((const char *)arg1, f);
 		f->R.rax = pid; // 부모 프로세스의 입장에서 반환값을 pid로 설정
 		break;
 	case SYS_EXEC:
@@ -542,7 +542,7 @@ int filesize(int fd)
 	return size;
 }
 
-pid_t fork(const char *thread_name)
+pid_t fork(const char *thread_name, struct intr_frame *f)
 {
 	// 0. 널포인터 검증 후 exit(-1)
 	if (thread_name == NULL)
@@ -556,10 +556,10 @@ pid_t fork(const char *thread_name)
 	const char *kernel_thread_name = copy_string_from_user_to_kernel(thread_name);
 	if (kernel_thread_name == NULL || (strlen(kernel_thread_name) == 0)) {
 		palloc_free_page(kernel_thread_name);
-		return false;
+		return -1;
 	}
 
-	tid_t pid = process_fork(kernel_thread_name, current_syscall_frame);
+	tid_t pid = process_fork(kernel_thread_name, f);
 	palloc_free_page(kernel_thread_name);
 
 	if (pid == TID_ERROR)
