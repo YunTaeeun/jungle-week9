@@ -271,18 +271,10 @@ static void run_task(char **argv)
 
 static void run_actions(char **argv)
 {
-	// printf("[run_actions] run_actions CALLED\n");
-
-	// 모든 argv 출력
-	// for (int i = 0; argv[i] != NULL; i++)
-	// {
-	//     printf("[run_actions] argv[%d]: %s\n", i, argv[i]);
-	// }
-
 	/* An action. */
 	struct action {
-		char *name; /* Action name. */
-		int argc;   /* # of args, including action name. */
+		char *name;		       /* Action name. */
+		int argc;		       /* # of args, including action name. */
 		void (*function)(char **argv); /* Function to execute action. */
 	};
 
@@ -293,9 +285,8 @@ static void run_actions(char **argv)
 	static const struct action actions[] = {
 	    {"run", 2, run_task},
 #ifdef FILESYS
-	    {"ls", 1, fsutil_ls},   {"cat", 2, fsutil_cat},
-	    {"rm", 2, fsutil_rm},   {"put", 2, fsutil_put},
-	    {"get", 2, fsutil_get},
+	    {"ls", 1, fsutil_ls},   {"cat", 2, fsutil_cat}, {"rm", 2, fsutil_rm},
+	    {"put", 2, fsutil_put}, {"get", 2, fsutil_get},
 #endif
 	    {NULL, 0, NULL},
 	};
@@ -304,30 +295,34 @@ static void run_actions(char **argv)
 		const struct action *a;
 		int i;
 
-		// printf("[run_actions] Processing action: %s\n", *argv);
-
 		/* Find action name. */
 		for (a = actions;; a++)
 			if (a->name == NULL)
-				PANIC("unknown action `%s' (use -h for help)",
-				      *argv);
+				PANIC("unknown action `%s' (use -h for help)", *argv);
 			else if (!strcmp(*argv, a->name))
 				break;
-
-		// printf("[run_actions] Found action '%s', argc=%d\n", a->name,
-		// a->argc);
 
 		/* Check for required arguments. */
 		for (i = 1; i < a->argc; i++)
 			if (argv[i] == NULL)
-				PANIC("action `%s' requires %d argument(s)",
-				      *argv, a->argc - 1);
+				PANIC("action `%s' requires %d argument(s)", *argv, a->argc - 1);
+
+		/* [수정] 'run' 액션일 경우 Executing 메시지 출력 */
+		/* Userprog 프로젝트의 일반 유저 프로그램은 process.c에서 출력하므로 중복 방지 */
+		if (strcmp(*argv, "run") == 0) {
+			bool should_print = true;
+#ifdef USERPROG
+			/* 유저 프로그램 모드에서는 thread_tests 옵션이 켜져있을 때만(커널 테스트
+			 * 실행 시) 출력 */
+			if (!thread_tests)
+				should_print = false;
+#endif
+			if (should_print)
+				printf("Executing '%s':\n", argv[1]);
+		}
 
 		/* Invoke action and advance. */
-		// printf("[run_actions] Calling function for '%s'\n", a->name);
 		a->function(argv);
-		// printf("[run_actions] Finished '%s', advancing by %d\n",
-		// a->name, a->argc);
 		argv += a->argc;
 	}
 
@@ -339,34 +334,33 @@ static void run_actions(char **argv)
    machine. */
 static void usage(void)
 {
-	printf(
-	    "\nCommand line syntax: [OPTION...] [ACTION...]\n"
-	    "Options must precede actions.\n"
-	    "Actions are executed in the order specified.\n"
-	    "\nAvailable actions:\n"
+	printf("\nCommand line syntax: [OPTION...] [ACTION...]\n"
+	       "Options must precede actions.\n"
+	       "Actions are executed in the order specified.\n"
+	       "\nAvailable actions:\n"
 #ifdef USERPROG
-	    "  run 'PROG [ARG...]' Run PROG and wait for it to complete.\n"
+	       "  run 'PROG [ARG...]' Run PROG and wait for it to complete.\n"
 #else
-	    "  run TEST           Run TEST.\n"
+	       "  run TEST           Run TEST.\n"
 #endif
 #ifdef FILESYS
-	    "  ls                 List files in the root directory.\n"
-	    "  cat FILE           Print FILE to the console.\n"
-	    "  rm FILE            Delete FILE.\n"
-	    "Use these actions indirectly via `pintos' -g and -p options:\n"
-	    "  put FILE           Put FILE into file system from scratch "
-	    "disk.\n"
-	    "  get FILE           Get FILE from file system into scratch "
-	    "disk.\n"
+	       "  ls                 List files in the root directory.\n"
+	       "  cat FILE           Print FILE to the console.\n"
+	       "  rm FILE            Delete FILE.\n"
+	       "Use these actions indirectly via `pintos' -g and -p options:\n"
+	       "  put FILE           Put FILE into file system from scratch "
+	       "disk.\n"
+	       "  get FILE           Get FILE from file system into scratch "
+	       "disk.\n"
 #endif
-	    "\nOptions:\n"
-	    "  -h                 Print this help message and power off.\n"
-	    "  -q                 Power off VM after actions or on panic.\n"
-	    "  -f                 Format file system disk during startup.\n"
-	    "  -rs=SEED           Set random number seed to SEED.\n"
-	    "  -mlfqs             Use multi-level feedback queue scheduler.\n"
+	       "\nOptions:\n"
+	       "  -h                 Print this help message and power off.\n"
+	       "  -q                 Power off VM after actions or on panic.\n"
+	       "  -f                 Format file system disk during startup.\n"
+	       "  -rs=SEED           Set random number seed to SEED.\n"
+	       "  -mlfqs             Use multi-level feedback queue scheduler.\n"
 #ifdef USERPROG
-	    "  -ul=COUNT          Limit user memory to COUNT pages.\n"
+	       "  -ul=COUNT          Limit user memory to COUNT pages.\n"
 #endif
 	);
 	power_off();
