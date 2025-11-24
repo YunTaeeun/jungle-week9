@@ -103,6 +103,7 @@ process_fork (const char *name, struct intr_frame *if_) {
 		return TID_ERROR;
 	}
 
+	// 포크 구조체에 부모 상태 복사 및 초기화 -> 이후 __do_fork 에 넘어감
 	fork_struct->parent = parent_thread;
 	memcpy(&fork_struct->parent_if, if_, sizeof(struct intr_frame));
 	sema_init(&fork_struct->fork_sema, 0);
@@ -122,6 +123,7 @@ process_fork (const char *name, struct intr_frame *if_) {
 	}
 
 	free(fork_struct);
+	// fork 가 성공하면 부모는 자식의 id를 받아야 하므로 tid 리턴
 	return tid;
 }
 
@@ -149,8 +151,7 @@ duplicate_pte (uint64_t *pte, void *va, void *aux) {
         return false; 
     }
 
-    /* 3. [중요] 자식을 위한 새 페이지(PAL_USER) 할당 */
-    // 여기가 빠져있어서 newpage가 쓰레기 값이었던 것입니다!
+    /* 3. 자식을 위한 새 페이지(PAL_USER) 할당 */
     newpage = palloc_get_page (PAL_USER); 
     if (newpage == NULL) {
         return false; // 메모리 부족
@@ -163,13 +164,12 @@ duplicate_pte (uint64_t *pte, void *va, void *aux) {
     /* 5. 쓰기 권한 확인 */
     writable = is_writable(pte);
 
-    /* 6. 자식의 페이지 테이블에 매핑 */
-    // 이제 깨끗한 newpage 주소가 들어가므로 에러가 나지 않습니다.
-    if (!pml4_set_page (current->pml4, va, newpage, writable)) {
-        /* 매핑 실패 시 할당받은 페이지 해제 */
-        palloc_free_page (newpage);
-        return false;
-    }
+		/* 6. 자식의 페이지 테이블에 매핑을 시도하고, 실패 시 처리 */
+		if (!pml4_set_page (current->pml4, va, newpage, writable)) {
+    	/* 매핑 실패 (메모리 부족 등) -> 할당받은 페이지 반납 */
+    	palloc_free_page (newpage);
+    	return false;
+		}
 
     return true;
 }
@@ -180,9 +180,8 @@ duplicate_pte (uint64_t *pte, void *va, void *aux) {
  *       That is, you are required to pass second argument of process_fork to
  *       this function. */
 static void
-// 인자로 부모값 가진 포크 구조체 넘어옴 
 __do_fork (void *aux) {
-
+	// 인자로 부모값 가진 포크 구조체 넘어온다 
 	struct fork_struct *parent_data = aux;
 	struct thread *parent = parent_data->parent;
 	struct thread *child = thread_current();
@@ -198,19 +197,20 @@ __do_fork (void *aux) {
 	// 포크된 자식의 리턴값은 0
 	if_.R.rax = 0;
 
-	/* 2. Duplicate PT (2. 페이지 테이블 복제) */
+	/* 2. 자식용 페이지 테이블 생성 */
 	child->pml4 = pml4_create();
 	if (child->pml4 == NULL) {
 		succ = false;
 		goto error;
 	}
-	// 새 주소 공간 활성화
+	// 새 주소 공간 활성화 -> lcr3 으로 CPU가 자식 pml4를 보게 cr3 레지스터 상태 교체 
 	process_activate (child);
 #ifdef VM
 	supplemental_page_table_init (&current->spt);
 	if (!supplemental_page_table_copy (&current->spt, &parent->spt))
 		goto error;
 #else
+	// 이제 CPU가 자식의 pml4를 봄 -> 지금부터 메모리에 등록 -> 자식에게 적용됨 -> 부모 페이지 테이블 복제		 
 	if (!pml4_for_each (parent->pml4, duplicate_pte, parent))
 		goto error;
 #endif
@@ -220,7 +220,6 @@ __do_fork (void *aux) {
 	 * TODO:       from the fork() until this function successfully duplicates
 	 * TODO:       the resources of parent.*/
 	// 3. FD 도 복제
-	lock_acquire(&filesys_lock);
 	for(int i = 2 ; i < FDT_LIMIT ; i++) {
 		struct file *file = parent->fd_table[i];
 		if(file != NULL) {
@@ -229,16 +228,21 @@ __do_fork (void *aux) {
 	}
 
 	// 10주차 rox
+	// 부모가 현재 실행중인 파일이 있다면
 	if (parent->running_file != NULL) {
+		// 자식의 실행중인 파일에도 복사
     child->running_file = file_duplicate(parent->running_file);
+		// 자식의 실행중인 파일도 deny_write 상태 유지 !
     file_deny_write(child->running_file);
 	}
-	lock_release(&filesys_lock);
 
+	// 유저 모드로 전환전, 포크 성공 유무 저장
 	parent_data->fork_success = true;
+	// 부모 깨우기
 	sema_up(&parent_data->fork_sema);
 
 	/* Finally, switch to the newly created process. */
+	// 자식은 유저모드로
 	if (succ)
 		do_iret (&if_);
 error:
@@ -262,6 +266,7 @@ process_exec (void *f_name) {
 	struct thread *cur = thread_current();
   if (cur->running_file != NULL) {
       lock_acquire(&filesys_lock);
+			// 다른 파일로 변경 전, 부모와 같이 참조하고 있는 파일 닫아줌
       file_close(cur->running_file);
       lock_release(&filesys_lock);
       cur->running_file = NULL;
@@ -324,11 +329,13 @@ process_wait (tid_t child_tid UNUSED) {
 		return -1 ;
 	}
 
-	// 두번 wait 방지 -> 📌 lock 생각 !
+	// 두번 wait 방지
+	lock_acquire(&filesys_lock);
 	if(search_child->waited){
 		return -1;
 	}
 	search_child->waited = true;
+	lock_release(&filesys_lock);
 	
 	// 부모는 자식의 개인 세마포어를 기다리면서 sleep
 	sema_down(&search_child->wait_sema);
@@ -371,7 +378,7 @@ process_exit (void) {
 	// 10주차 rox
 	 if (cur_thread->running_file != NULL) {
       lock_acquire(&filesys_lock);
-      file_allow_write(cur_thread->running_file);
+			// exit 전 열려있던 파일 닫아줌 (이때 deny_write 도 allow_write 로 변경됨)
       file_close(cur_thread->running_file);
       lock_release(&filesys_lock);
       cur_thread->running_file = NULL;
@@ -590,16 +597,12 @@ load (const char *file_name, struct intr_frame *if_) {
 		goto done;
 	process_activate (thread_current ());   // 새 페이지 테이블 활성화
 
-	
 	/* 2️⃣ 실행 파일 열기 */
 	file = filesys_open (program_name);        // 파일 시스템에서 실행 파일 탐색 및 오픈
 	if (file == NULL) {
 		printf ("load: %s: open failed\n", program_name);
 		goto done;
 	}
-	// 10주차 rox
-	// t ->running_file = file;
-	// file_deny_write(file);
 
 	/* 3️⃣ ELF 헤더 읽고 검증 */
 	// 실행 파일이 올바른 ELF 포맷인지 확인
@@ -689,10 +692,10 @@ load (const char *file_name, struct intr_frame *if_) {
 
 done:
     /* 1. 로딩 성공 시 처리 */
+		// 10주차 rox
     if (success) {
         t->running_file = file; // 스레드 구조체에 저장
         file_deny_write(file);  // 쓰기 방지 설정 (이게 핵심!)        
-        // [절대 금지] 여기서 file_close(file) 하면 안 됨!
     } 
     /* 2. 로딩 실패 시 처리 */
     else {
