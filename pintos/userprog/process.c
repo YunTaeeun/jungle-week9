@@ -372,16 +372,52 @@ error:
 int process_exec(void *f_name)
 {
 	bool success;
-	char *file_name = palloc_get_page(0);
-	if (file_name == NULL)
-		return -1;
-	strlcpy(file_name, f_name, strlen(f_name) + 1);
+	// char *file_name = palloc_get_page(0);
+	// if (file_name == NULL)
+	// 	return -1;
+	// strlcpy(file_name, f_name, strlen(f_name) + 1);
 
 	/* 1. 유저 모드 진입을 위한 '임시' CPU 레지스터(intr_frame)를 설정. */
 	struct intr_frame _if;
 	_if.ds = _if.es = _if.ss = SEL_UDSEG;
 	_if.cs = SEL_UCSEG;
-	_if.eflags = FLAG_IF | FLAG_MBS; // 인터럽트 활성화
+	_if.eflags = FLAG_IF | FLAG_MBS;
+
+	/* [추가] 파일 존재 여부 사전 확인 (Page Fault 방지용)
+	       process_cleanup()을 하기 전에 파일이 있는지 확인해야 합니다.
+	       만약 파일이 없어서 여기서 -1을 리턴하면, 현재 프로세스는 죽지 않고
+	       계속 실행될 수 있습니다. */
+
+	char *fn_copy = palloc_get_page(0);
+	if (fn_copy == NULL)
+		return -1;
+	strlcpy(fn_copy, f_name, PGSIZE);
+
+	char *save_ptr;
+	char *prog_name = strtok_r(fn_copy, " ", &save_ptr);
+
+	struct file *f = filesys_open(prog_name);
+	if (f == NULL) {
+		/* 파일이 없으면 에러 메시지 출력 후 프로세스 종료 */
+		printf("load: %s: open failed\n", prog_name);
+
+		palloc_free_page(fn_copy);
+
+		struct thread *curr = thread_current();
+
+		/* [추가] running_info가 NULL일 수 있으므로 체크 (Kernel Panic 방지) */
+		if (curr->running_info != NULL &&
+		    curr->running_info != (struct child_info *)0xDEADBEEF) {
+			curr->running_info->exit_status = -1;
+		}
+
+		/* [추가] exit 메시지 수동 출력 (thread_exit은 출력하지 않으므로) */
+		printf("%s: exit(%d)\n", curr->name, -1);
+
+		thread_exit();
+	}
+	file_close(f);
+	palloc_free_page(fn_copy);
 
 	/* 2. 현재 실행 파일 닫기 (exec로 새 프로그램 실행 시) */
 	struct thread *curr = thread_current();
@@ -396,24 +432,16 @@ int process_exec(void *f_name)
 	process_cleanup(); // 코드, 데이터, 스택 영역 삭제
 
 	/* 3. load() 함수를 호출하여 새 프로그램을 메모리에 적재. */
-	// printf("===> load.\n");
-
-	success = load(file_name, &_if);
-
-	/* 4. f_name은 process_create_initd에서 할당(palloc)한 복사본이므로,
-	 * 로드가 끝났으니 해당 메모리 페이지를 해제. */
-	palloc_free_page(file_name);
-
+	success = load(f_name, &_if);
 	if (!success)
-		exit(-1); // 로드 실패했으나 이미 이 프로그램의 메모리 cleanup된 상태. 유저
-			  // 프로그램의 rip에 가리키는 주소가 없음. 치명적 오류로 exit(-1)
+		return -1;
 
-	/* 5. do_iret()을 호출하여 유저 모드로 전환.
-	 * CPU 레지스터가 _if에 설정된 값(rip, rsp 등)으로 갱신되며,
+	/* 4. 로드가 끝났으니 메모리 페이지를 해제. */
+	palloc_free_page(f_name);
+
+	/* 5. 유저 모드로 전환.
 	 * 유저 프로그램의 진입점(rip)에서 실행을 시작.
 	 * 이 함수는 커널로 돌아오지 않음. */
-	// printf("===> do_iret.\n");
-
 	do_iret(&_if);
 	NOT_REACHED();
 }

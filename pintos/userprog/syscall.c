@@ -401,12 +401,14 @@ int exec(const char *file)
 		exit(-1);
 
 	// 2. 유저메모리에 있던 파일명을 커널메모리로 복사 (동적할당)
+	// 유저 메모리는 페이징 등에 의해 언제든 접근 불가능해지거나 변경될 수 있기 때문.
 	const char *kernel_file = copy_string_from_user_to_kernel(file);
 	if (kernel_file == NULL || (strlen(kernel_file) == 0)) {
 		palloc_free_page(kernel_file);
 		return -1;
 	}
 
+	// 3. ELF 바이너리 로딩과 실행을 위임
 	int result = process_exec(kernel_file);
 
 	// 메모리 해제
