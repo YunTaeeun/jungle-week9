@@ -261,7 +261,7 @@ thread_create (const char *name, int priority,thread_func *function, void *aux) 
 	t->fd_table = palloc_get_page(PAL_ZERO);
 	if(t->fd_table == NULL) {
 		palloc_free_page(t);
-		PANIC("Failed to allocate FDT");
+		return TID_ERROR;
 	}
 	t->next_fd = 2; // 0 -> STDIN , 1 -> STDOUT
 	// 0,1 은 표준으로 있으니까 dummy 값 넣어놓기

@@ -41,7 +41,7 @@ void syscall_init(void)
     lock_init(&filesys_lock);
 }
 
-/*         유저 메모리 검증 함수들              */
+/* 유저 메모리 검증 함수들 -> 유저 프로그램에서 잘못된 접근을 했을 때, 사용자 프로그램만 다운시키고 OS는 유지되게 해주는 함수들 */
 /* 단일 주소가 유효한 유저 주소인지 검사 */
 void
 check_address(void *addr) {
@@ -76,7 +76,7 @@ copy_user_string(const char *ustr) {
     
     char *kstr = palloc_get_page(0);
     if (kstr == NULL) {
-        exit_with_status(-1); // 일관성 있게 exit
+        exit_with_status(-1); 
     }
     
     int i;
@@ -222,13 +222,13 @@ sys_exec(struct intr_frame *f)
 
 void sys_wait (struct intr_frame *f) 
 {
-  // 1. 첫 번째 인자(rdi)에서 기다릴 'child_tid'를 읽어옵니다.
+  // 1. 첫 번째 인자(rdi)에서 기다릴 'child_tid'를 읽어옴.
   tid_t child_tid = (tid_t)f->R.rdi;
   
-  // 2. wait 함수를 호출합니다.
+  // 2. wait 함수를 호출.
   int status = process_wait(child_tid); 
   
-  // 3. 자식의 종료 코드(status)를 반환값 레지스터(rax)에 저장합니다.
+  // 3. 자식의 종료 코드(status)를 반환값 레지스터(rax)에 저장.
   f->R.rax = status;
 }
 
@@ -238,9 +238,11 @@ void sys_create(struct intr_frame *f)
     unsigned initial_size = (unsigned)f->R.rsi;
     
     check_address(file);
-    
-    // filesys_create 호출
+
+    // filesys_create 호출 
+    lock_acquire(&filesys_lock);
     f->R.rax = filesys_create(file, initial_size);
+    lock_release(&filesys_lock);
 }
 
 void sys_remove(struct intr_frame *f) 
@@ -248,7 +250,9 @@ void sys_remove(struct intr_frame *f)
     const char *file = (const char *)f->R.rdi;
     check_address(file);
     
+    lock_acquire(&filesys_lock);
     f->R.rax = filesys_remove(file);
+    lock_release(&filesys_lock);
 }
 
 void sys_open(struct intr_frame *f) 
@@ -284,7 +288,6 @@ void sys_open(struct intr_frame *f)
       break;
     }
   }
-
   // 반목문을 다 돌았는데도 -1? -> 테이블이 꽉 차서 배정받지 못한 경우 -> 파일 닫아줘야 함
   if(fd == -1) {
     lock_acquire(&filesys_lock);
@@ -321,10 +324,10 @@ void sys_read(struct intr_frame *f)
   void *buffer = (void *)f->R.rsi;
   unsigned size = f->R.rdx;
 
-  if(size == 0) {
-    f->R.rax = 0;
-    return;
-  }
+  // if(size == 0) {
+  //   f->R.rax = 0;
+  //   return;
+  // }
 
   check_buffer(buffer, size);
   // fd=0 -> 표준입력 : 키보드 입력
@@ -369,10 +372,10 @@ void sys_write(struct intr_frame *f)
   const void *buffer = (void *)f->R.rsi;  // 2번 인자 : buffer (출력할 문자의 주소)
   unsigned size = f->R.rdx;               // 3번 인자 : size (출력할 문자의 길이)
 
-  if(size == 0) {
-    f->R.rax = 0;
-    return;
-  }
+  // if(size == 0) {
+  //   f->R.rax = 0;
+  //   return;
+  // }
 
 	check_buffer(buffer, size);							// 사용자가 넘겨준 buffer 주소를 읽어도 되는지 확인
 
