@@ -41,6 +41,7 @@ struct initd_args
     const char* fn_copy;
     struct child_info* info;
 };
+extern struct lock filesys_lock;
 
 /* Starts the first userland program, called "initd", loaded from FILE_NAME.
  * The new thread may be scheduled (and may even exit)
@@ -157,6 +158,7 @@ tid_t process_fork(const char* name, struct intr_frame* if_ UNUSED)
 
     if (child_tid == TID_ERROR)
     {
+        list_remove(&info->elem);
         free(info);  // 실패하면 해제
         palloc_free_page(fork_data);
         return TID_ERROR;
@@ -382,6 +384,17 @@ int process_exec(void* f_name)
     // fn_copy = 'programname args ~'
     strlcpy(fn_copy, f_name, PGSIZE);
 
+    /* [추가된 코드] 이전 실행 파일 정리 */
+    struct thread* cur = thread_current();
+    if (cur->exec_file != NULL)
+    {
+        // 주의: 파일 시스템 락 정책에 따라 lock_acquire가 필요할 수 있음
+        lock_acquire(&filesys_lock);
+        file_close(cur->exec_file);
+        lock_release(&filesys_lock);
+        cur->exec_file = NULL;
+    }
+
     /* We first kill the current context */
     /* 먼저 현재 컨텍스트를 종료합니다 */
     process_cleanup();  // 현재 프로세스의 리소스 정리
@@ -478,30 +491,36 @@ void process_exit(void)
 
     struct thread* t = thread_current();
 
+    lock_acquire(&filesys_lock);
+
     /* 파일 디스크립터 정리 */
     // 모든 열린 파일 닫기 STDIN(0), STDOUT(1) 포함
 
-    for (int i = 0; i < MAX_FD; i++)
-    {
-        struct file* file = t->fds[i];
-
-        if (file != NULL && file != (struct file*)1 && file != (struct file*)2)
+    /* 파일 디스크립터 정리 (사용자님의 훌륭한 로직 유지) */
+    if (t->fds != NULL)
+    {  // [추가 2] fds 할당 여부 체크 (안전장치)
+        for (int i = 0; i < MAX_FD; i++)
         {
-            /* 이미 닫힌 파일이거나 표준 입출력 마커면 패스 */
-            /* STDIN_VAL, STDOUT_VAL 체크 추가 */
+            struct file* file = t->fds[i];
 
-            file_close(file);
-            t->fds[i] = NULL;  // 현재 FD 닫음
-
-            /* [핵심] 현재 닫은 파일과 같은 주소를 가리키는 다른 FD들도 모두 NULL로 만듦 */
-            for (int j = i + 1; j < MAX_FD; j++)
+            // 0, 1번(STDIN, STDOUT)이나 NULL, 이미 닫힌 파일 패스
+            if (file != NULL && file != (struct file*)1 && file != (struct file*)2)
             {
-                if (t->fds[j] == file)
+                file_close(file);  // 이제 락 안에서 안전하게 실행됨
+                t->fds[i] = NULL;
+
+                // 중복 FD 처리 (dup2 대응)
+                for (int j = i + 1; j < MAX_FD; j++)
                 {
-                    t->fds[j] = NULL;  // 미리 지워서 나중에 또 닫지 않게 함
+                    if (t->fds[j] == file)
+                    {
+                        t->fds[j] = NULL;
+                    }
                 }
             }
         }
+        palloc_free_page(t->fds);
+        t->fds = NULL;  // Dangling Pointer 방지
     }
     // 할당했던 fds 반환
     palloc_free_page(t->fds);
@@ -513,6 +532,8 @@ void process_exit(void)
         file_close(t->exec_file);
         t->exec_file = NULL;
     }
+
+    lock_release(&filesys_lock);
 
     /* 1. 부모에게 내 종료 상태 알림 */
     if (t->my_info != NULL)

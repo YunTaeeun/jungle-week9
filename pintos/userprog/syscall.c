@@ -18,7 +18,7 @@
 
 #define STDIN_VAL ((struct file *)1)   // 파일 디스크립터 0,1번 오픈
 #define STDOUT_VAL ((struct file *)2)  // 파일 디스크립터 0,1번 오픈
-static struct lock filesys_lock;
+struct lock filesys_lock;
 
 void syscall_entry(void);
 void syscall_handler(struct intr_frame *);
