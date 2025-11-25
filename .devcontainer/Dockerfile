@@ -18,6 +18,7 @@ RUN export DEBIAN_FRONTEND=noninteractive && \
     sudo \
     qemu-system-x86 \
     python3 \
+    clangd \
     && locale-gen ko_KR.UTF-8 && update-locale LANG=ko_KR.UTF-8 
 # && apt-get clean \
 # && rm -rf /var/lib/apt/lists/*
@@ -28,7 +29,7 @@ RUN echo "jungle ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/jungle
 USER jungle
 WORKDIR /home/jungle
 
-RUN echo "source /workspaces/jungle-week9/pintos/activate" >> /home/jungle/.bashrc
+RUN echo "source /workspaces/jungle-week10-11/pintos/activate" >> /home/jungle/.bashrc
 
 # Clone the repository
 # RUN git clone https://github.com/casys-kaist/pintos-kaist /home/jungle/pintos
